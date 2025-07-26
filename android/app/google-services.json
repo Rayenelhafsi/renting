@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "206765489783",
+    "project_id": "renting-63b80",
+    "storage_bucket": "renting-63b80.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:206765489783:android:70f7e9f8a12d7c385bd072",
+        "android_client_info": {
+          "package_name": "com.example.house_rental_manager"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "206765489783-7se1lfqa9038b6553je9o5k4bv24j30e.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDUaFXZ9zrDm_OYZt75P_xHgStJNPssSno"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "206765489783-7se1lfqa9038b6553je9o5k4bv24j30e.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
