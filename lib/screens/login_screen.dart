@@ -31,11 +31,8 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (userCredential.user != null) {
-        // Set user role as admin in Firestore
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userCredential.user!.uid)
-            .set({'role': 'admin'}, SetOptions(merge: true));
+        // Do NOT create or update Firestore document for admin on login
+        // Admin is identified by email/password login only
 
         Navigator.pushReplacement(
           context,
@@ -87,7 +84,11 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       // Sign in anonymously for owner
-      await FirebaseAuth.instance.signInAnonymously();
+      UserCredential userCredential = await FirebaseAuth.instance.signInAnonymously();
+
+      // Do NOT create a new Firestore user document for anonymous user
+      // Instead, rely on existing ownerId document for role and authorization
+      // Do NOT create or update Firestore document for owner on login
 
       // Navigate to owner home screen
       Navigator.pushReplacement(
@@ -137,6 +138,13 @@ class _LoginScreenState extends State<LoginScreen> {
         );
         return;
       }
+
+      // Sign in anonymously for owner
+      UserCredential userCredential = await FirebaseAuth.instance.signInAnonymously();
+
+      // Do NOT create a new Firestore user document for anonymous user
+      // Instead, rely on existing scannedCode document for role and authorization
+      // Do NOT create or update Firestore document for owner on login
 
       // Navigate to owner home screen
       Navigator.pushReplacement(

@@ -40,7 +40,7 @@ class OwnerHomeScreen extends StatelessWidget {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => HouseDetailsScreen(house: house),
+        builder: (_) => HouseDetailsScreen(house: house, ownerId: ownerId),
       ),
     );
   }
@@ -78,7 +78,7 @@ class OwnerHomeScreen extends StatelessWidget {
                           as List)
                       .isNotEmpty;
               return ListTile(
-                title: Text(house['name']),
+                title: Text(house['name'] ?? 'No Name'),
                 subtitle: Text('ID: ${house.id}'),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,

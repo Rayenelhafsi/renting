@@ -6,7 +6,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 class HouseDetailsScreen extends StatefulWidget {
   final DocumentSnapshot house;
-  const HouseDetailsScreen({super.key, required this.house});
+  final String? ownerId;
+  const HouseDetailsScreen({super.key, required this.house, this.ownerId});
 
   @override
   State<HouseDetailsScreen> createState() => _HouseDetailsScreenState();
@@ -50,26 +51,37 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   }
 
   Future<void> _fetchUserRole() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      final userDocSnapshot = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      final userData = userDocSnapshot.data();
-      String? role;
-      if (userData != null && userData.containsKey('role')) {
-        final dynamic roleField = userData['role'];
+    String? role;
+    if (widget.ownerId != null) {
+      // Fetch role based on passed ownerId
+      final ownerDoc = await FirebaseFirestore.instance.collection('users').doc(widget.ownerId).get();
+      final ownerData = ownerDoc.data();
+      if (ownerData != null && ownerData.containsKey('role')) {
+        final roleField = ownerData['role'];
         if (roleField is String) {
           role = roleField;
         }
       }
-      setState(() {
-        _userRole = role;
-        _isLoadingRole = false;
-      });
     } else {
-      setState(() {
-        _isLoadingRole = false;
-      });
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        // Try to get role from current user's Firestore doc
+        final userDocSnapshot = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        var userData = userDocSnapshot.data();
+
+        if (userData != null && userData.containsKey('role')) {
+          final dynamic roleField = userData['role'];
+          if (roleField is String) {
+            role = roleField;
+          }
+        }
+      }
     }
+
+    setState(() {
+      _userRole = role;
+      _isLoadingRole = false;
+    });
   }
 
   List<DateTime> _parseDates(List<dynamic> dates) {
@@ -190,7 +202,7 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.house['name']),
+        title: Text(widget.house['name'] ?? 'No Name'),
       ),
       body: Column(
         children: [
