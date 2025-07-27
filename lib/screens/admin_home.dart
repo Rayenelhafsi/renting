@@ -17,41 +17,36 @@ class AdminHomeScreen extends StatefulWidget {
 }
 
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
-  late Future<List<Map<String, dynamic>>> _ownersWithHousesFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _ownersWithHousesFuture = _fetchOwnersWithHouses();
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchOwnersWithHouses() async {
-    final usersSnapshot = await FirebaseFirestore.instance
+  Stream<List<Map<String, dynamic>>> _ownersWithHousesStream() {
+    final usersStream = FirebaseFirestore.instance
         .collection('users')
         .where('role', isEqualTo: 'owner')
-        .get();
+        .snapshots();
 
-    final housesSnapshot =
-        await FirebaseFirestore.instance.collection('houses').get();
+    final housesStream = FirebaseFirestore.instance.collection('houses').snapshots();
 
-    // Map ownerId to list of houses
-    final Map<String, List<DocumentSnapshot>> ownerHousesMap = {};
-    for (var house in housesSnapshot.docs) {
-      final ownerId = house['ownerId'];
-      if (ownerHousesMap.containsKey(ownerId)) {
-        ownerHousesMap[ownerId]!.add(house);
-      } else {
-        ownerHousesMap[ownerId] = [house];
+    return usersStream.asyncMap((usersSnapshot) async {
+      final housesSnapshot = await housesStream.first;
+
+      // Map ownerId to list of houses
+      final Map<String, List<DocumentSnapshot>> ownerHousesMap = {};
+      for (var house in housesSnapshot.docs) {
+        final ownerId = house['ownerId'];
+        if (ownerHousesMap.containsKey(ownerId)) {
+          ownerHousesMap[ownerId]!.add(house);
+        } else {
+          ownerHousesMap[ownerId] = [house];
+        }
       }
-    }
 
-    return usersSnapshot.docs.map((ownerDoc) {
-      final ownerId = ownerDoc.id;
-      return {
-        'owner': ownerDoc,
-        'houses': ownerHousesMap[ownerId] ?? [],
-      };
-    }).toList();
+      return usersSnapshot.docs.map((ownerDoc) {
+        final ownerId = ownerDoc.id;
+        return {
+          'owner': ownerDoc,
+          'houses': ownerHousesMap[ownerId] ?? [],
+        };
+      }).toList();
+    });
   }
 
   void _logout(BuildContext context) async {
@@ -142,38 +137,39 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                         onPressed: () => _navigateToHouseDetails(house),
                       ),
                       if (hasPending)
-                        IconButton(
-                          icon: const Icon(Icons.circle,
-                              color: Colors.red, size: 14),
-                          tooltip: 'Pending availability changes',
-                          onPressed: () async {
-                            // Confirm pending changes
-                            final ref = FirebaseFirestore.instance
-                                .collection('houses')
-                                .doc(house.id);
-                            final pendingAvailability =
-                                houseData['availabilityPending']
-                                    as List<dynamic>;
-                            final pendingCleaning =
-                                houseData['cleaningSchedulePending']
-                                        as List<dynamic>? ??
-                                    [];
-                            await ref.update({
-                              'availability': pendingAvailability,
-                              'cleaningSchedule': pendingCleaning,
-                              'availabilityPending': [],
-                              'cleaningSchedulePending': [],
-                            });
-                            setState(() {
-                              _ownersWithHousesFuture =
-                                  _fetchOwnersWithHouses();
-                            });
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text(
-                                      'Pending availability changes confirmed')),
-                            );
-                          },
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.check_circle,
+                                  color: Colors.green, size: 20),
+                              tooltip: 'Confirm pending changes',
+                              onPressed: () async {
+                                final ref = FirebaseFirestore.instance
+                                    .collection('houses')
+                                    .doc(house.id);
+                                final pendingAvailability =
+                                    houseData['availabilityPending']
+                                        as List<dynamic>;
+                                final pendingCleaning =
+                                    houseData['cleaningSchedulePending']
+                                            as List<dynamic>? ??
+                                        [];
+                                await ref.update({
+                                  'availability': pendingAvailability,
+                                  'cleaningSchedule': pendingCleaning,
+                                  'availabilityPending': [],
+                                  'cleaningSchedulePending': [],
+                                });
+                                setState(() {});
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text(
+                                          'Pending availability changes confirmed')),
+                                );
+                              },
+                            ),
+                          ],
                         ),
                     ],
                   );
@@ -203,14 +199,14 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           ),
           TextButton.icon(
             onPressed: _navigateToCreateOwner,
-            icon: const Icon(Icons.person_add, color: Colors.white),
+            icon: const Icon(Icons.person_add, color: Color.fromARGB(255, 255, 128, 0)),
             label:
-                const Text('New Owner', style: TextStyle(color: Colors.white)),
+                const Text('New Owner', style: TextStyle(color: Color.fromARGB(255, 255, 128, 0))),
           ),
         ],
       ),
-      body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _ownersWithHousesFuture,
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _ownersWithHousesStream(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());

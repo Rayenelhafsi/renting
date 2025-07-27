@@ -6,13 +6,16 @@ import 'house_details.dart';
 import 'login_screen.dart';
 
 class OwnerHomeScreen extends StatelessWidget {
-  const OwnerHomeScreen({super.key});
+  final String? ownerId;
+  const OwnerHomeScreen({super.key, this.ownerId});
 
   Future<List<DocumentSnapshot>> _getOwnerHouses() async {
-    final userId = FirebaseAuth.instance.currentUser!.uid;
+    if (ownerId == null) {
+      return [];
+    }
     final querySnapshot = await FirebaseFirestore.instance
         .collection('houses')
-        .where('ownerId', isEqualTo: userId)
+        .where('ownerId', isEqualTo: ownerId)
         .get();
     return querySnapshot.docs;
   }
@@ -99,10 +102,11 @@ class OwnerHomeScreen extends StatelessWidget {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _goToAddHouse(context),
-        child: const Icon(Icons.add),
-      ),
+      // Remove the floating action button to prevent owners from adding houses
+      // floatingActionButton: FloatingActionButton(
+      //   onPressed: () => _goToAddHouse(context),
+      //   child: const Icon(Icons.add),
+      // ),
     );
   }
 }

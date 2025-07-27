@@ -14,6 +14,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController usernameController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+  final TextEditingController ownerIdController = TextEditingController();
   bool isLoading = false;
 
   Future<void> login() async {
@@ -30,6 +31,43 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         throw Exception('Invalid username or password');
       }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    } finally {
+      setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> loginWithOwnerId() async {
+    setState(() => isLoading = true);
+    try {
+      String ownerId = ownerIdController.text.trim();
+
+      if (ownerId.isEmpty) {
+        throw Exception('Please enter your Owner ID');
+      }
+
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(ownerId)
+          .get();
+
+      if (!userDoc.exists) {
+        throw Exception('Owner ID does not exist');
+      }
+
+      String role = userDoc['role'];
+      if (role != 'owner') {
+        throw Exception('User is not an owner');
+      }
+
+      // Navigate to owner home screen
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => OwnerHomeScreen(ownerId: ownerId)),
+      );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString())),
@@ -77,7 +115,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // Navigate to owner home screen
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const OwnerHomeScreen()),
+        MaterialPageRoute(builder: (_) => OwnerHomeScreen(ownerId: scannedCode)),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -94,39 +132,56 @@ class _LoginScreenState extends State<LoginScreen> {
             ? const CircularProgressIndicator()
             : Padding(
                 padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text('Login', style: TextStyle(fontSize: 32)),
-                    const SizedBox(height: 20),
-                    TextField(
-                      controller: usernameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Username',
-                        border: OutlineInputBorder(),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text('Login', style: TextStyle(fontSize: 32)),
+                      const SizedBox(height: 20),
+                      TextField(
+                        controller: usernameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Username',
+                          border: OutlineInputBorder(),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: passwordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Password',
-                        border: OutlineInputBorder(),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: passwordController,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Password',
+                          border: OutlineInputBorder(),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: login,
-                      child: const Text('Login'),
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton.icon(
-                      onPressed: scanQRCode,
-                      icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('Login with QR Code'),
-                    ),
-                  ],
+                      const SizedBox(height: 20),
+                      ElevatedButton(
+                        onPressed: login,
+                        child: const Text('Login'),
+                      ),
+                      const SizedBox(height: 20),
+                      const Divider(),
+                      const SizedBox(height: 20),
+                      TextField(
+                        controller: ownerIdController,
+                        decoration: const InputDecoration(
+                          labelText: 'Owner ID',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ElevatedButton(
+                        onPressed: loginWithOwnerId,
+                        child: const Text('Login as Owner'),
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton.icon(
+                        onPressed: scanQRCode,
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('Login with QR Code'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
       ),

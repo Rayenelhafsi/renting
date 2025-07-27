@@ -38,50 +38,66 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class Root extends StatelessWidget {
+class Root extends StatefulWidget {
   const Root({super.key});
 
   @override
+  State<Root> createState() => _RootState();
+}
+
+class _RootState extends State<Root> {
+  User? _user;
+  DocumentSnapshot? _userDoc;
+  late final Stream<User?> _authStateChanges;
+  Stream<DocumentSnapshot>? _userDocStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _authStateChanges = FirebaseAuth.instance.authStateChanges();
+    _authStateChanges.listen((user) {
+      setState(() {
+        _user = user;
+        if (user != null) {
+          _userDocStream = FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .snapshots();
+          _userDocStream!.listen((doc) {
+            setState(() {
+              _userDoc = doc;
+            });
+          });
+        } else {
+          _userDocStream = null;
+          _userDoc = null;
+        }
+      });
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, authSnapshot) {
-        if (authSnapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
+    if (_user == null) {
+      return const LoginScreen();
+    }
 
-        if (!authSnapshot.hasData) {
-          return const OwnerHomeScreen();
-        }
+    if (_userDoc == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
-        final userId = authSnapshot.data!.uid;
+    if (!_userDoc!.exists) {
+      return const LoginScreen();
+    }
 
-        return FutureBuilder<DocumentSnapshot>(
-          future:
-              FirebaseFirestore.instance.collection('users').doc(userId).get(),
-          builder: (context, userSnapshot) {
-            if (userSnapshot.connectionState == ConnectionState.waiting) {
-              return const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
-              );
-            }
+    final role = _userDoc!['role'];
 
-            if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
-              return const LoginScreen();
-            }
-
-            final role = userSnapshot.data!['role'];
-
-            if (role == 'admin') {
-              return const AdminHomeScreen();
-            } else {
-              return const OwnerHomeScreen();
-            }
-          },
-        );
-      },
-    );
+    if (role == 'admin') {
+      return const AdminHomeScreen();
+    } else {
+      return const OwnerHomeScreen();
+    }
   }
 }

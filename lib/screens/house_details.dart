@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class HouseDetailsScreen extends StatefulWidget {
   final DocumentSnapshot house;
@@ -19,6 +20,8 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   late Set<String> _updatedAvailability;
   late Set<String> _updatedCleaningSchedule;
 
+  String? _userRole;
+
   @override
   void initState() {
     super.initState();
@@ -28,6 +31,18 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     _updatedAvailability = widget.house['availability'].cast<String>().toSet();
     _updatedCleaningSchedule =
         widget.house['cleaningSchedule'].cast<String>().toSet();
+
+    _fetchUserRole();
+  }
+
+  Future<void> _fetchUserRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      setState(() {
+        _userRole = userDoc.data()?['role'];
+      });
+    }
   }
 
   List<DateTime> _parseDates(List<dynamic> dates) {
@@ -53,8 +68,6 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
       decoration: BoxDecoration(
         color: isAvailable
             ? Colors.green[300]
-            : isCleaning
-                ? Colors.blue[200]
                 : Colors.red[300], // Unavailable dates shown in red
         shape: BoxShape.circle,
       ),
@@ -99,20 +112,40 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   }
 
   Future<void> _confirmChanges() async {
+    if (_userRole == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('User role not determined yet. Please try again.')),
+      );
+      return;
+    }
+
     final ref =
         FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
     try {
-      await ref.update({
-        'availabilityPending': _updatedAvailability.toList(),
-        'cleaningSchedulePending': _updatedCleaningSchedule.toList(),
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Availability changes submitted for approval')),
-      );
-      setState(() {
-        // Do not update availableDates and cleaningDates until admin approves
-      });
+      if (_userRole == 'owner') {
+        // Owner: update pending fields
+        await ref.update({
+          'availabilityPending': _updatedAvailability.toList(),
+          'cleaningSchedulePending': _updatedCleaningSchedule.toList(),
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Availability changes submitted for approval')),
+        );
+      } else {
+        // Admin: update main fields directly
+        await ref.update({
+          'availability': _updatedAvailability.toList(),
+          'cleaningSchedule': _updatedCleaningSchedule.toList(),
+        });
+        setState(() {
+          availableDates = _parseDates(_updatedAvailability.toList());
+          cleaningDates = _parseDates(_updatedCleaningSchedule.toList());
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Availability changes updated successfully')),
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to submit availability changes: $e')),
