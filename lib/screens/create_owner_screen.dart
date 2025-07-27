@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 class CreateOwnerScreen extends StatefulWidget {
@@ -14,8 +15,6 @@ class _CreateOwnerScreenState extends State<CreateOwnerScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
 
   String? _newOwnerId;
   bool _isLoading = false;
@@ -29,29 +28,19 @@ class _CreateOwnerScreenState extends State<CreateOwnerScreen> {
     });
 
     try {
-      // Create user with Firebase Auth
-      UserCredential userCredential =
-          await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
-
-      final ownerId = userCredential.user!.uid;
-
-      // Add owner details to Firestore
-      await FirebaseFirestore.instance.collection('users').doc(ownerId).set({
+      // Add owner details to Firestore with auto-generated ID
+      final docRef = await FirebaseFirestore.instance.collection('users').add({
         'name': _nameController.text.trim(),
         'phone': _phoneController.text.trim(),
-        'email': _emailController.text.trim(),
         'role': 'owner',
       });
 
       setState(() {
-        _newOwnerId = ownerId;
+        _newOwnerId = docRef.id;
       });
-    } on FirebaseAuthException catch (e) {
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.message}')),
+        SnackBar(content: Text('Error: $e')),
       );
     } finally {
       setState(() {
@@ -103,24 +92,6 @@ class _CreateOwnerScreenState extends State<CreateOwnerScreen> {
                     decoration: const InputDecoration(labelText: 'Phone'),
                     validator: (value) => value == null || value.isEmpty
                         ? 'Please enter a phone number'
-                        : null,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(labelText: 'Email'),
-                    keyboardType: TextInputType.emailAddress,
-                    validator: (value) => value == null || !value.contains('@')
-                        ? 'Please enter a valid email'
-                        : null,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _passwordController,
-                    decoration: const InputDecoration(labelText: 'Password'),
-                    obscureText: true,
-                    validator: (value) => value == null || value.length < 6
-                        ? 'Password must be at least 6 characters'
                         : null,
                   ),
                   const SizedBox(height: 20),
