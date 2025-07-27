@@ -200,7 +200,9 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
               firstDay: DateTime.utc(2024),
               lastDay: DateTime.utc(2030),
               calendarFormat: CalendarFormat.month,
-              // sixWeekMonths: false, // Removed because this property does not exist in this version of table_calendar
+              availableCalendarFormats: const {
+                CalendarFormat.month: 'Month',
+              },
               calendarStyle: const CalendarStyle(
                 todayDecoration: BoxDecoration(
                   color: Colors.orange,
