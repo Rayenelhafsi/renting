@@ -36,6 +36,19 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     _fetchUserRole();
   }
 
+  Future<void> reloadData() async {
+    final doc = await FirebaseFirestore.instance.collection('houses').doc(widget.house.id).get();
+    final data = doc.data();
+    if (data != null) {
+      setState(() {
+        availableDates = _parseDates(data['availability'] ?? []);
+        cleaningDates = _parseDates(data['cleaningSchedule'] ?? []);
+        _updatedAvailability = (data['availability'] ?? []).cast<String>().toSet();
+        _updatedCleaningSchedule = (data['cleaningSchedule'] ?? []).cast<String>().toSet();
+      });
+    }
+  }
+
   Future<void> _fetchUserRole() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -171,6 +184,8 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     }
   }
 
+  DateTime _focusedDay = DateTime.now();
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -181,10 +196,11 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
         children: [
           Expanded(
             child: TableCalendar(
-              focusedDay: DateTime.now(),
+              focusedDay: _focusedDay,
               firstDay: DateTime.utc(2024),
               lastDay: DateTime.utc(2030),
               calendarFormat: CalendarFormat.month,
+              // sixWeekMonths: false, // Removed because this property does not exist in this version of table_calendar
               calendarStyle: const CalendarStyle(
                 todayDecoration: BoxDecoration(
                   color: Colors.orange,
@@ -197,6 +213,11 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
               onDaySelected: (selectedDay, _) {
                 setState(() {
                   _toggleDate(_updatedAvailability, selectedDay);
+                });
+              },
+              onPageChanged: (focusedDay) {
+                setState(() {
+                  _focusedDay = focusedDay;
                 });
               },
             ),

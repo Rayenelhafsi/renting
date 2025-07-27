@@ -66,13 +66,15 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
-  void _navigateToHouseDetails(DocumentSnapshot houseDoc) {
-    Navigator.push(
+  Future<void> _navigateToHouseDetails(DocumentSnapshot houseDoc) async {
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => HouseDetailsScreen(house: houseDoc),
       ),
     );
+    // After returning from house details, refresh the state to update UI
+    setState(() {});
   }
 
   void _navigateToCreateOwner() {
@@ -153,7 +155,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                         as List<dynamic>;
                                 final pendingCleaning =
                                     houseData['cleaningSchedulePending']
-                                            as List<dynamic>? ??
+                                            as List<dynamic>? ?? 
                                         [];
                                 await ref.update({
                                   'availability': pendingAvailability,
@@ -162,6 +164,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                   'cleaningSchedulePending': [],
                                 });
                                 setState(() {});
+                                // Notify user of update
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
                                       content: Text(
