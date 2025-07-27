@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_barcode_scanner/flutter_barcode_scanner.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'admin_home.dart';
 import 'owner_home.dart';
 
@@ -17,20 +18,42 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController ownerIdController = TextEditingController();
   bool isLoading = false;
 
+
   Future<void> login() async {
     setState(() => isLoading = true);
     try {
-      String username = usernameController.text.trim();
+      String email = usernameController.text.trim();
       String password = passwordController.text.trim();
 
-      if (username == 'root' && password == 'd90087579c') {
+      UserCredential userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      if (userCredential.user != null) {
+        // Set user role as admin in Firestore
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .set({'role': 'admin'}, SetOptions(merge: true));
+
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const AdminHomeScreen()),
         );
       } else {
-        throw Exception('Invalid username or password');
+        throw Exception('Failed to sign in');
       }
+    } on FirebaseAuthException catch (e) {
+      String message = 'Login failed';
+      if (e.code == 'user-not-found') {
+        message = 'No user found for that email.';
+      } else if (e.code == 'wrong-password') {
+        message = 'Wrong password provided.';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString())),
@@ -62,6 +85,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (role != 'owner') {
         throw Exception('User is not an owner');
       }
+
+      // Sign in anonymously for owner
+      await FirebaseAuth.instance.signInAnonymously();
 
       // Navigate to owner home screen
       Navigator.pushReplacement(

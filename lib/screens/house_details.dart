@@ -21,6 +21,7 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   late Set<String> _updatedCleaningSchedule;
 
   String? _userRole;
+  bool _isLoadingRole = true;
 
   @override
   void initState() {
@@ -38,9 +39,22 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   Future<void> _fetchUserRole() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final userDocSnapshot = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final userData = userDocSnapshot.data();
+      String? role;
+      if (userData != null && userData.containsKey('role')) {
+        final dynamic roleField = userData['role'];
+        if (roleField is String) {
+          role = roleField;
+        }
+      }
       setState(() {
-        _userRole = userDoc.data()?['role'];
+        _userRole = role;
+        _isLoadingRole = false;
+      });
+    } else {
+      setState(() {
+        _isLoadingRole = false;
       });
     }
   }
@@ -132,7 +146,7 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
           const SnackBar(
               content: Text('Availability changes submitted for approval')),
         );
-      } else {
+      } else if (_userRole == 'admin') {
         // Admin: update main fields directly
         await ref.update({
           'availability': _updatedAvailability.toList(),
@@ -144,6 +158,10 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Availability changes updated successfully')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User role not authorized to confirm changes')),
         );
       }
     } catch (e) {
@@ -185,10 +203,16 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
           ),
           Padding(
             padding: const EdgeInsets.all(8.0),
-            child: ElevatedButton(
-              onPressed: _confirmChanges,
-              child: const Text('Confirm Availability Changes'),
-            ),
+          child: ElevatedButton(
+            onPressed: (_isLoadingRole || _userRole == null) ? null : _confirmChanges,
+            child: _isLoadingRole
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Confirm Availability Changes'),
+          ),
           ),
         ],
       ),
