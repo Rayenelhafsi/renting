@@ -15,11 +15,19 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   late List<DateTime> availableDates;
   late List<DateTime> cleaningDates;
 
+  // Local copies to track changes before confirmation
+  late Set<String> _updatedAvailability;
+  late Set<String> _updatedCleaningSchedule;
+
   @override
   void initState() {
     super.initState();
     availableDates = _parseDates(widget.house['availability']);
     cleaningDates = _parseDates(widget.house['cleaningSchedule']);
+
+    _updatedAvailability = widget.house['availability'].cast<String>().toSet();
+    _updatedCleaningSchedule =
+        widget.house['cleaningSchedule'].cast<String>().toSet();
   }
 
   List<DateTime> _parseDates(List<dynamic> dates) {
@@ -30,30 +38,15 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
-  void _toggleDate(List<DateTime> list, String field, DateTime date) async {
+  void _toggleDate(Set<String> set, DateTime date) {
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
-    final ref = FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
-
-    final isInList = widget.house[field].contains(dateStr);
-
-    await ref.update({
-      field: isInList
-          ? FieldValue.arrayRemove([dateStr])
-          : FieldValue.arrayUnion([dateStr]),
-    });
-
-    setState(() {
-      if (isInList) {
-        list.removeWhere((d) => _isSameDay(d, date));
-      } else {
-        list.add(date);
-      }
-    });
+    set.contains(dateStr) ? set.remove(dateStr) : set.add(dateStr);
   }
 
   Widget _buildCalendarCell(DateTime day) {
-    final isAvailable = availableDates.any((d) => _isSameDay(d, day));
-    final isCleaning = cleaningDates.any((d) => _isSameDay(d, day));
+    final dateStr = DateFormat('yyyy-MM-dd').format(day);
+    final isAvailable = _updatedAvailability.contains(dateStr);
+    final isCleaning = _updatedCleaningSchedule.contains(dateStr);
 
     return Container(
       margin: const EdgeInsets.all(4),
@@ -62,7 +55,7 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
             ? Colors.green[300]
             : isCleaning
                 ? Colors.blue[200]
-                : Colors.grey[200],
+                : Colors.red[300], // Unavailable dates shown in red
         shape: BoxShape.circle,
       ),
       alignment: Alignment.center,
@@ -79,18 +72,23 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
         child: Wrap(
           runSpacing: 10,
           children: [
-            Text('Selected Day: $dateStr', style: const TextStyle(fontSize: 16)),
+            Text('Selected Day: $dateStr',
+                style: const TextStyle(fontSize: 16)),
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
-                _toggleDate(availableDates, 'availability', date);
+                setState(() {
+                  _toggleDate(_updatedAvailability, date);
+                });
               },
               child: const Text('Toggle Availability'),
             ),
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
-                _toggleDate(cleaningDates, 'cleaningSchedule', date);
+                setState(() {
+                  _toggleDate(_updatedCleaningSchedule, date);
+                });
               },
               child: const Text('Toggle Cleaning Schedule'),
             ),
@@ -100,27 +98,65 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     );
   }
 
+  Future<void> _confirmChanges() async {
+    final ref =
+        FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
+    try {
+      await ref.update({
+        'availability': _updatedAvailability.toList(),
+        'cleaningSchedule': _updatedCleaningSchedule.toList(),
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Availability updated successfully')),
+      );
+      setState(() {
+        availableDates =
+            _updatedAvailability.map((d) => DateTime.parse(d)).toList();
+        cleaningDates =
+            _updatedCleaningSchedule.map((d) => DateTime.parse(d)).toList();
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update availability: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.house['name']),
       ),
-      body: TableCalendar(
-        focusedDay: DateTime.now(),
-        firstDay: DateTime.utc(2024),
-        lastDay: DateTime.utc(2030),
-        calendarFormat: CalendarFormat.month,
-        calendarStyle: const CalendarStyle(
-          todayDecoration: BoxDecoration(
-            color: Colors.orange,
-            shape: BoxShape.circle,
+      body: Column(
+        children: [
+          Expanded(
+            child: TableCalendar(
+              focusedDay: DateTime.now(),
+              firstDay: DateTime.utc(2024),
+              lastDay: DateTime.utc(2030),
+              calendarFormat: CalendarFormat.month,
+              calendarStyle: const CalendarStyle(
+                todayDecoration: BoxDecoration(
+                  color: Colors.orange,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              calendarBuilders: CalendarBuilders(
+                defaultBuilder: (context, day, _) => _buildCalendarCell(day),
+              ),
+              onDaySelected: (selectedDay, _) =>
+                  _showDayOptions(context, selectedDay),
+            ),
           ),
-        ),
-        calendarBuilders: CalendarBuilders(
-          defaultBuilder: (context, day, _) => _buildCalendarCell(day),
-        ),
-        onDaySelected: (selectedDay, _) => _showDayOptions(context, selectedDay),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: ElevatedButton(
+              onPressed: _confirmChanges,
+              child: const Text('Confirm Availability Changes'),
+            ),
+          ),
+        ],
       ),
     );
   }
