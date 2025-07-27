@@ -69,10 +69,30 @@ class OwnerHomeScreen extends StatelessWidget {
             itemCount: houses.length,
             itemBuilder: (context, index) {
               final house = houses[index];
+              final hasPending = (house.data() as Map<String, dynamic>)
+                      .containsKey('availabilityPending') &&
+                  ((house.data() as Map<String, dynamic>)['availabilityPending']
+                          as List)
+                      .isNotEmpty;
               return ListTile(
                 title: Text(house['name']),
                 subtitle: Text('ID: ${house.id}'),
-                trailing: const Icon(Icons.arrow_forward_ios),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (hasPending)
+                      Container(
+                        width: 12,
+                        height: 12,
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    const Icon(Icons.arrow_forward_ios),
+                  ],
+                ),
                 onTap: () => _openHouseDetails(context, house),
               );
             },

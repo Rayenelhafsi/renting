@@ -103,21 +103,19 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
         FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
     try {
       await ref.update({
-        'availability': _updatedAvailability.toList(),
-        'cleaningSchedule': _updatedCleaningSchedule.toList(),
+        'availabilityPending': _updatedAvailability.toList(),
+        'cleaningSchedulePending': _updatedCleaningSchedule.toList(),
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Availability updated successfully')),
+        const SnackBar(
+            content: Text('Availability changes submitted for approval')),
       );
       setState(() {
-        availableDates =
-            _updatedAvailability.map((d) => DateTime.parse(d)).toList();
-        cleaningDates =
-            _updatedCleaningSchedule.map((d) => DateTime.parse(d)).toList();
+        // Do not update availableDates and cleaningDates until admin approves
       });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update availability: $e')),
+        SnackBar(content: Text('Failed to submit availability changes: $e')),
       );
     }
   }
@@ -145,8 +143,11 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
               calendarBuilders: CalendarBuilders(
                 defaultBuilder: (context, day, _) => _buildCalendarCell(day),
               ),
-              onDaySelected: (selectedDay, _) =>
-                  _showDayOptions(context, selectedDay),
+              onDaySelected: (selectedDay, _) {
+                setState(() {
+                  _toggleDate(_updatedAvailability, selectedDay);
+                });
+              },
             ),
           ),
           Padding(

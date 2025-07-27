@@ -130,9 +130,52 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               runSpacing: 8,
               children: [
                 ...houses.map((house) {
-                  return ActionChip(
-                    label: Text(house['name']),
-                    onPressed: () => _navigateToHouseDetails(house),
+                  final houseData = house.data() as Map<String, dynamic>;
+                  final hasPending =
+                      houseData.containsKey('availabilityPending') &&
+                          (houseData['availabilityPending'] as List).isNotEmpty;
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ActionChip(
+                        label: Text(house['name']),
+                        onPressed: () => _navigateToHouseDetails(house),
+                      ),
+                      if (hasPending)
+                        IconButton(
+                          icon: const Icon(Icons.circle,
+                              color: Colors.red, size: 14),
+                          tooltip: 'Pending availability changes',
+                          onPressed: () async {
+                            // Confirm pending changes
+                            final ref = FirebaseFirestore.instance
+                                .collection('houses')
+                                .doc(house.id);
+                            final pendingAvailability =
+                                houseData['availabilityPending']
+                                    as List<dynamic>;
+                            final pendingCleaning =
+                                houseData['cleaningSchedulePending']
+                                        as List<dynamic>? ??
+                                    [];
+                            await ref.update({
+                              'availability': pendingAvailability,
+                              'cleaningSchedule': pendingCleaning,
+                              'availabilityPending': [],
+                              'cleaningSchedulePending': [],
+                            });
+                            setState(() {
+                              _ownersWithHousesFuture =
+                                  _fetchOwnersWithHouses();
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text(
+                                      'Pending availability changes confirmed')),
+                            );
+                          },
+                        ),
+                    ],
                   );
                 }).toList(),
                 ActionChip(
