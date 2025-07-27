@@ -27,53 +27,47 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'your-web-api-key',
-    appId: 'your-web-app-id',
-    messagingSenderId: 'your-web-messaging-sender-id',
-    projectId: 'your-project-id',
-    authDomain: 'your-auth-domain',
-    storageBucket: 'your-storage-bucket',
-    measurementId: 'your-measurement-id',
+    apiKey: 'AIzaSyAzbUA836HTL9B9_frI_zsTXs-CnyGAklc',
+    appId: '1:269507169080:web:2a8eda75d98bc938510fcd',
+    messagingSenderId: '269507169080',
+    projectId: 'tresor-home-renting',
+    authDomain: 'tresor-home-renting.firebaseapp.com',
+    storageBucket: 'tresor-home-renting.firebasestorage.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'your-android-api-key',
-    appId: 'your-android-app-id',
-    messagingSenderId: 'your-android-messaging-sender-id',
-    projectId: 'your-project-id',
-    storageBucket: 'your-storage-bucket',
+    apiKey: 'AIzaSyCHC9N6_rooZCXXllkNBX507eYqAcvK4sY',
+    appId: '1:269507169080:android:91374a3c259866ec510fcd',
+    messagingSenderId: '269507169080',
+    projectId: 'tresor-home-renting',
+    storageBucket: 'tresor-home-renting.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'your-ios-api-key',
-    appId: 'your-ios-app-id',
-    messagingSenderId: 'your-ios-messaging-sender-id',
-    projectId: 'your-project-id',
-    storageBucket: 'your-storage-bucket',
-    iosBundleId: 'your-ios-bundle-id',
-    iosClientId: 'your-ios-client-id',
-    androidClientId: 'your-android-client-id',
-    databaseURL: 'your-database-url',
+    apiKey: 'AIzaSyCwIQPvqYy99_S5AYs-d6SVzislBEYcDZw',
+    appId: '1:269507169080:ios:7b596e5c2109c4f3510fcd',
+    messagingSenderId: '269507169080',
+    projectId: 'tresor-home-renting',
+    storageBucket: 'tresor-home-renting.firebasestorage.app',
+    iosBundleId: 'com.example.houseRentalManager',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'your-macos-api-key',
-    appId: 'your-macos-app-id',
-    messagingSenderId: 'your-macos-messaging-sender-id',
-    projectId: 'your-project-id',
-    storageBucket: 'your-storage-bucket',
-    iosBundleId: 'your-macos-bundle-id',
-    iosClientId: 'your-macos-client-id',
-    androidClientId: 'your-macos-android-client-id',
-    databaseURL: 'your-macos-database-url',
+    apiKey: 'AIzaSyCwIQPvqYy99_S5AYs-d6SVzislBEYcDZw',
+    appId: '1:269507169080:ios:7b596e5c2109c4f3510fcd',
+    messagingSenderId: '269507169080',
+    projectId: 'tresor-home-renting',
+    storageBucket: 'tresor-home-renting.firebasestorage.app',
+    iosBundleId: 'com.example.houseRentalManager',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'your-windows-api-key',
-    appId: 'your-windows-app-id',
-    messagingSenderId: 'your-windows-messaging-sender-id',
-    projectId: 'your-project-id',
-    storageBucket: 'your-storage-bucket',
+    apiKey: 'AIzaSyAzbUA836HTL9B9_frI_zsTXs-CnyGAklc',
+    appId: '1:269507169080:web:8097a85dac53e73b510fcd',
+    messagingSenderId: '269507169080',
+    projectId: 'tresor-home-renting',
+    authDomain: 'tresor-home-renting.firebaseapp.com',
+    storageBucket: 'tresor-home-renting.firebasestorage.app',
   );
 
   static const FirebaseOptions linux = FirebaseOptions(

@@ -1,36 +1,26 @@
 {
   "project_info": {
-    "project_number": "206765489783",
-    "project_id": "renting-63b80",
-    "storage_bucket": "renting-63b80.firebasestorage.app"
+    "project_number": "269507169080",
+    "project_id": "tresor-home-renting",
+    "storage_bucket": "tresor-home-renting.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:206765489783:android:70f7e9f8a12d7c385bd072",
+        "mobilesdk_app_id": "1:269507169080:android:91374a3c259866ec510fcd",
         "android_client_info": {
           "package_name": "com.example.house_rental_manager"
         }
       },
-      "oauth_client": [
-        {
-          "client_id": "206765489783-7se1lfqa9038b6553je9o5k4bv24j30e.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
+      "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDUaFXZ9zrDm_OYZt75P_xHgStJNPssSno"
+          "current_key": "AIzaSyCHC9N6_rooZCXXllkNBX507eYqAcvK4sY"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "206765489783-7se1lfqa9038b6553je9o5k4bv24j30e.apps.googleusercontent.com",
-              "client_type": 3
-            }
-          ]
+          "other_platform_oauth_client": []
         }
       }
     }
