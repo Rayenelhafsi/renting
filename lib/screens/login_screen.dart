@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_barcode_scanner/flutter_barcode_scanner.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'barcode_scanner_screen.dart';
 import 'admin_home.dart';
 import 'owner_home.dart';
 
@@ -18,14 +18,14 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController ownerIdController = TextEditingController();
   bool isLoading = false;
 
-
   Future<void> login() async {
     setState(() => isLoading = true);
     try {
       String email = usernameController.text.trim();
       String password = passwordController.text.trim();
 
-      UserCredential userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+      UserCredential userCredential =
+          await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
@@ -84,7 +84,8 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       // Sign in anonymously for owner
-      UserCredential userCredential = await FirebaseAuth.instance.signInAnonymously();
+      UserCredential userCredential =
+          await FirebaseAuth.instance.signInAnonymously();
 
       // Do NOT create a new Firestore user document for anonymous user
       // Instead, rely on existing ownerId document for role and authorization
@@ -106,15 +107,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> scanQRCode() async {
     try {
-      String scannedCode = await FlutterBarcodeScanner.scanBarcode(
-        '#ff6666', // scanning line color
-        'Cancel', // cancel button text
-        true, // show flash icon
-        ScanMode.QR,
+      final scannedCode = await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const BarcodeScannerScreen()),
       );
 
-      if (scannedCode == '-1') {
-        // User cancelled the scan
+      if (scannedCode == null || scannedCode == '') {
+        // User cancelled the scan or no code scanned
         return;
       }
 
@@ -140,7 +139,8 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       // Sign in anonymously for owner
-      UserCredential userCredential = await FirebaseAuth.instance.signInAnonymously();
+      UserCredential userCredential =
+          await FirebaseAuth.instance.signInAnonymously();
 
       // Do NOT create a new Firestore user document for anonymous user
       // Instead, rely on existing scannedCode document for role and authorization
@@ -149,7 +149,8 @@ class _LoginScreenState extends State<LoginScreen> {
       // Navigate to owner home screen
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => OwnerHomeScreen(ownerId: scannedCode)),
+        MaterialPageRoute(
+            builder: (_) => OwnerHomeScreen(ownerId: scannedCode)),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
