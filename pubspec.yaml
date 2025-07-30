@@ -35,9 +35,8 @@ flutter:
   #   - images/a_dot_ham.jpeg
 
   # To add custom fonts to your application, add a fonts section here.
-  # fonts:
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic
+  fonts:
+    - family: Cinzel
+      fonts:
+        - asset: fonts/Cinzel-VariableFont_wght.ttf
+          weight: 600

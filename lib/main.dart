@@ -29,9 +29,19 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'House Rental Manager',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+      theme: ThemeData.dark().copyWith(
         useMaterial3: true,
+        textTheme: ThemeData.dark().textTheme.apply(
+          bodyColor: Colors.white,
+          displayColor: Colors.white,
+          fontFamily: 'Cinzel',
+        ),
+        colorScheme: ColorScheme.dark(
+          primary: Colors.white,
+          onPrimary: Colors.white,
+          background: Colors.black,
+          onBackground: Colors.white,
+        ),
       ),
       home: const Root(),
     );
