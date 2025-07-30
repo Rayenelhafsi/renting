@@ -95,31 +95,32 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      elevation: 6,
+      shadowColor: Colors.black54,
+      color: Colors.white,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                QrImageView(
-                  data: ownerDoc.id,
-                  size: 80,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(ownerName,
-                          style: const TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
-                      Text(ownerPhone, style: const TextStyle(fontSize: 16)),
-                    ],
-                  ),
-                ),
-              ],
+            Center(
+              child: QrImageView(
+                data: ownerDoc.id,
+                size: 100,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Center(
+              child: Text(ownerName,
+                  style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black)),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(ownerPhone,
+                  style: const TextStyle(fontSize: 18, color: Colors.black)),
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -135,7 +136,15 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ActionChip(
-                        label: Text(house['name']),
+                        label: Text(house['name'],
+                            style: const TextStyle(color: Colors.black)),
+                        backgroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          side: const BorderSide(color: Colors.black),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        elevation: 4,
+                        shadowColor: Colors.black54,
                         onPressed: () => _navigateToHouseDetails(house),
                       ),
                       if (hasPending)
@@ -177,10 +186,19 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     ],
                   );
                 }).toList(),
-                ActionChip(
-                  label: const Text('Add House'),
-                  avatar: const Icon(Icons.add),
-                  onPressed: () => _navigateToAddHouse(ownerDoc),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    ElevatedButton(
+                      onPressed: () => _navigateToAddHouse(ownerDoc),
+                      child: const Text('Add House'),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: _navigateToCreateOwner,
+                      child: const Text('New Owner'),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -194,7 +212,10 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('House Owners (Admin)'),
+        backgroundColor: Colors.white,
+        title: const Text('House Owners (Admin)', style: TextStyle(color: Colors.black)),
+        iconTheme: const IconThemeData(color: Colors.black),
+        actionsIconTheme: const IconThemeData(color: Colors.black),
         actions: [
           IconButton(
             onPressed: () => _logout(context),
