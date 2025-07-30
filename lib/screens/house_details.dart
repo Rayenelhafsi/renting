@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:convert';
+import 'package:image_picker/image_picker.dart';
 
 class HouseDetailsScreen extends StatefulWidget {
   final DocumentSnapshot house;
@@ -24,6 +27,16 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   String? _userRole;
   bool _isLoadingRole = true;
 
+  // New fields for photos, price, and notes
+  List<String> photos = [];
+  double? price;
+  TextEditingController noteController = TextEditingController();
+
+  // Carousel related
+  late PageController _pageController;
+  int _currentPage = 0;
+  Timer? _carouselTimer;
+
   @override
   void initState() {
     super.initState();
@@ -34,18 +47,52 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     _updatedCleaningSchedule =
         widget.house['cleaningSchedule'].cast<String>().toSet();
 
+    final data = widget.house.data() as Map<String, dynamic>? ?? {};
+    photos = List<String>.from(data.containsKey('photosBase64') ? data['photosBase64'] : []);
+    price = (data.containsKey('price') && data['price'] != null) ? (data['price'] as num).toDouble() : null;
+    noteController.text = data.containsKey('note') ? data['note'] : '';
+
+    _pageController = PageController(initialPage: 0);
+
+    _startCarousel();
+
     _fetchUserRole();
+  }
+
+  void _startCarousel() {
+    _carouselTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (photos.isNotEmpty && _pageController.hasClients) {
+        _currentPage = (_currentPage + 1) % photos.length;
+        _pageController.animateToPage(
+          _currentPage,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeInOut,
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _carouselTimer?.cancel();
+    _pageController.dispose();
+    noteController.dispose();
+    super.dispose();
   }
 
   Future<void> reloadData() async {
     final doc = await FirebaseFirestore.instance.collection('houses').doc(widget.house.id).get();
-    final data = doc.data();
-    if (data != null) {
+    final data = doc.data() as Map<String, dynamic>? ?? {};
+    if (data.isNotEmpty) {
       setState(() {
         availableDates = _parseDates(data['availability'] ?? []);
         cleaningDates = _parseDates(data['cleaningSchedule'] ?? []);
         _updatedAvailability = (data['availability'] ?? []).cast<String>().toSet();
         _updatedCleaningSchedule = (data['cleaningSchedule'] ?? []).cast<String>().toSet();
+
+        photos = List<String>.from(data.containsKey('photosBase64') ? data['photosBase64'] : []);
+        price = (data.containsKey('price') && data['price'] != null) ? (data['price'] as num).toDouble() : null;
+        noteController.text = data.containsKey('note') ? data['note'] : '';
       });
     }
   }
@@ -53,7 +100,6 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   Future<void> _fetchUserRole() async {
     String? role;
     if (widget.ownerId != null) {
-      // Fetch role based on passed ownerId
       final ownerDoc = await FirebaseFirestore.instance.collection('users').doc(widget.ownerId).get();
       final ownerData = ownerDoc.data();
       if (ownerData != null && ownerData.containsKey('role')) {
@@ -65,7 +111,6 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     } else {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
-        // Try to get role from current user's Firestore doc
         final userDocSnapshot = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
         var userData = userDocSnapshot.data();
 
@@ -92,22 +137,18 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
-  void _toggleDate(Set<String> set, DateTime date) {
-    final dateStr = DateFormat('yyyy-MM-dd').format(date);
-    set.contains(dateStr) ? set.remove(dateStr) : set.add(dateStr);
-  }
 
   Widget _buildCalendarCell(DateTime day) {
     final dateStr = DateFormat('yyyy-MM-dd').format(day);
     final isAvailable = _updatedAvailability.contains(dateStr);
-    final isCleaning = _updatedCleaningSchedule.contains(dateStr);
+    // final isCleaning = _updatedCleaningSchedule.contains(dateStr);
 
     return Container(
       margin: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: isAvailable
             ? Colors.green[300]
-                : Colors.red[300], // Unavailable dates shown in red
+            : Colors.red[300], // Unavailable dates shown in red
         shape: BoxShape.circle,
       ),
       alignment: Alignment.center,
@@ -115,39 +156,48 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     );
   }
 
-  void _showDayOptions(BuildContext context, DateTime date) {
+
+  void _toggleDate(Set<String> set, DateTime date) {
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: Wrap(
-          runSpacing: 10,
-          children: [
-            Text('Selected Day: $dateStr',
-                style: const TextStyle(fontSize: 16)),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                setState(() {
-                  _toggleDate(_updatedAvailability, date);
-                });
-              },
-              child: const Text('Toggle Availability'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                setState(() {
-                  _toggleDate(_updatedCleaningSchedule, date);
-                });
-              },
-              child: const Text('Toggle Cleaning Schedule'),
-            ),
-          ],
-        ),
-      ),
-    );
+    set.contains(dateStr) ? set.remove(dateStr) : set.add(dateStr);
+  }
+
+  Future<void> _saveNote() async {
+    final ref = FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
+    try {
+      await ref.update({'note': noteController.text});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Note saved successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save note: $e')),
+      );
+    }
+  }
+
+  Future<void> _uploadPhoto() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile == null) return;
+
+    final bytes = await pickedFile.readAsBytes();
+    final base64Image = base64Encode(bytes);
+
+    try {
+      final ref = FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
+      photos.add(base64Image);
+      await ref.update({'photosBase64': photos});
+
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Photo uploaded successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to upload photo: $e')),
+      );
+    }
   }
 
   Future<void> _confirmChanges() async {
@@ -162,7 +212,6 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
         FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
     try {
       if (_userRole == 'owner') {
-        // Owner: update pending fields
         await ref.update({
           'availabilityPending': _updatedAvailability.toList(),
           'cleaningSchedulePending': _updatedCleaningSchedule.toList(),
@@ -172,7 +221,6 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
               content: Text('Availability changes submitted for approval')),
         );
       } else if (_userRole == 'admin') {
-        // Admin: update main fields directly
         await ref.update({
           'availability': _updatedAvailability.toList(),
           'cleaningSchedule': _updatedCleaningSchedule.toList(),
@@ -204,52 +252,184 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
       appBar: AppBar(
         title: Text(widget.house['name'] ?? 'No Name'),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: TableCalendar(
-              focusedDay: _focusedDay,
-              firstDay: DateTime.utc(2024),
-              lastDay: DateTime.utc(2030),
-              calendarFormat: CalendarFormat.month,
-              availableCalendarFormats: const {
-                CalendarFormat.month: 'Month',
-              },
-              calendarStyle: const CalendarStyle(
-                todayDecoration: BoxDecoration(
-                  color: Colors.orange,
-                  shape: BoxShape.circle,
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            // Photo carousel or upload button
+            Container(
+              height: 250,
+              color: Colors.grey[200],
+            child: Stack(
+              children: [
+                PageView.builder(
+                  controller: _pageController,
+                  itemCount: photos.length,
+                  itemBuilder: (context, index) {
+                    try {
+                      final decodedBytes = base64Decode(photos[index]);
+                      return Image.memory(
+                        decodedBytes,
+                        fit: BoxFit.cover,
+                      );
+                    } catch (e) {
+                      return const Center(child: Icon(Icons.broken_image));
+                    }
+                  },
+                ),
+                Positioned(
+                  right: 8,
+                  bottom: 8,
+                  child: ElevatedButton.icon(
+                    onPressed: _uploadPhoto,
+                    icon: const Icon(Icons.upload),
+                    label: const Text('Upload Photos'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.black54,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            ),
+            const SizedBox(height: 8),
+            // Price display
+            if (price != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '\$${price!.toStringAsFixed(2)} / month',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueAccent,
+                    ),
+                  ),
                 ),
               ),
-              calendarBuilders: CalendarBuilders(
-                defaultBuilder: (context, day, _) => _buildCalendarCell(day),
+            const SizedBox(height: 8),
+            // Book button
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: ElevatedButton(
+                onPressed: () {
+                  // Navigate to calendar or booking screen (reuse current calendar UI)
+                  showModalBottomSheet(
+                    context: context,
+                    builder: (_) => SizedBox(
+                      height: 400,
+                      child: TableCalendar(
+                        focusedDay: _focusedDay,
+                        firstDay: DateTime.utc(2024),
+                        lastDay: DateTime.utc(2030),
+                        calendarFormat: CalendarFormat.month,
+                        availableCalendarFormats: const {
+                          CalendarFormat.month: 'Month',
+                        },
+                        calendarStyle: const CalendarStyle(
+                          todayDecoration: BoxDecoration(
+                            color: Colors.orange,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        calendarBuilders: CalendarBuilders(
+                          defaultBuilder: (context, day, _) => _buildCalendarCell(day),
+                        ),
+                        onDaySelected: (selectedDay, _) {
+                          setState(() {
+                            _toggleDate(_updatedAvailability, selectedDay);
+                          });
+                        },
+                        onPageChanged: (focusedDay) {
+                          setState(() {
+                            _focusedDay = focusedDay;
+                          });
+                        },
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Book The Apartment'),
               ),
-              onDaySelected: (selectedDay, _) {
-                setState(() {
-                  _toggleDate(_updatedAvailability, selectedDay);
-                });
-              },
-              onPageChanged: (focusedDay) {
-                setState(() {
-                  _focusedDay = focusedDay;
-                });
-              },
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-          child: ElevatedButton(
-            onPressed: (_isLoadingRole || _userRole == null) ? null : _confirmChanges,
-            child: _isLoadingRole
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Confirm Availability Changes'),
-          ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            // Note-taking area
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Notes',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: noteController,
+                    maxLines: 5,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      hintText: 'Enter your notes here',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: _saveNote,
+                    child: const Text('Save Note'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            // Existing calendar availability UI
+            SizedBox(
+              height: 400,
+              child: TableCalendar(
+                focusedDay: _focusedDay,
+                firstDay: DateTime.utc(2024),
+                lastDay: DateTime.utc(2030),
+                calendarFormat: CalendarFormat.month,
+                availableCalendarFormats: const {
+                  CalendarFormat.month: 'Month',
+                },
+                calendarStyle: const CalendarStyle(
+                  todayDecoration: BoxDecoration(
+                    color: Colors.orange,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                calendarBuilders: CalendarBuilders(
+                  defaultBuilder: (context, day, _) => _buildCalendarCell(day),
+                ),
+                onDaySelected: (selectedDay, _) {
+                  setState(() {
+                    _toggleDate(_updatedAvailability, selectedDay);
+                  });
+                },
+                onPageChanged: (focusedDay) {
+                  setState(() {
+                    _focusedDay = focusedDay;
+                  });
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: ElevatedButton(
+                onPressed: (_isLoadingRole || _userRole == null) ? null : _confirmChanges,
+                child: _isLoadingRole
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Confirm Availability Changes'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
