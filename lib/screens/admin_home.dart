@@ -313,7 +313,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-          // Combined row: All Owners, Select House, Select State, Assign Button
+          // Combined row: All Owners, Select House, Select State, Assign Button, Clear Button
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
@@ -409,13 +409,39 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                         : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.grey,
+                      disabledBackgroundColor: const Color.fromARGB(255, 158, 158, 158),
                       foregroundColor: Colors.black,
                       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
                       minimumSize: const Size(0, 30),
                     ),
                     child: const Text(
                       'Assign',
+                      style: TextStyle(fontSize: 10),
+                    ),
+                  ),
+                ),
+              ),
+              // Clear Filters Button
+              Expanded(
+                flex: 1,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        _selectedOwnerId = null;
+                        _selectedHouse = null;
+                        _selectedState = null;
+                      });
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color.fromARGB(255, 255, 174, 0),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+                      minimumSize: const Size(0, 30),
+                    ),
+                    child: const Text(
+                      'Clear',
                       style: TextStyle(fontSize: 10),
                     ),
                   ),
