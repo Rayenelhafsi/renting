@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.CAMERA"/>
 
     <application
-        android:label="house_rental_manager"
+        android:label="Trésor immobilier"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

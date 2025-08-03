@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'dart:convert';
 import 'add_house_screen.dart';
 import 'house_details.dart';
 import 'login_screen.dart';
@@ -45,6 +46,67 @@ class OwnerHomeScreen extends StatelessWidget {
     );
   }
 
+  // Helper method to get status color based on status value
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'cleaning':
+      case 'assigned':
+        return Colors.orange;
+      case 'done':
+        return Colors.green;
+      case 'pending':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // Helper method to get status icon based on status value
+  IconData _getStatusIcon(String status) {
+    switch (status.toLowerCase()) {
+      case 'cleaning':
+        return Icons.cleaning_services;
+      case 'assigned':
+        return Icons.assignment;
+      case 'done':
+        return Icons.check_circle;
+      case 'pending':
+        return Icons.pending;
+      default:
+        return Icons.help;
+    }
+  }
+
+  // Helper method to build status badge
+  Widget _buildStatusBadge(String title, String status) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: _getStatusColor(status),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            _getStatusIcon(status),
+            size: 16,
+            color: Colors.white,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            '$title: $status',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -69,6 +131,7 @@ class OwnerHomeScreen extends StatelessWidget {
 
           final houses = snapshot.data!;
           return ListView.builder(
+            padding: const EdgeInsets.all(16),
             itemCount: houses.length,
             itemBuilder: (context, index) {
               final house = houses[index];
@@ -76,52 +139,120 @@ class OwnerHomeScreen extends StatelessWidget {
               final hasPending = houseData.containsKey('availabilityPending') &&
                   (houseData['availabilityPending'] as List).isNotEmpty;
 
-              // New: Get cleaning status and other service statuses
+              // Get cleaning status and other service statuses
               final cleaningStatus = houseData['cleaningStatus'] ?? 'unknown';
               final plumberStatus = houseData['plumberStatus'] ?? 'none';
               final electricianStatus = houseData['electricianStatus'] ?? 'none';
               final foodDeliveryStatus = houseData['foodDeliveryStatus'] ?? 'none';
 
-              return ListTile(
-                title: Text(house['name'] ?? 'No Name'),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('ID: ${house.id}'),
-                    const SizedBox(height: 4),
-                    Text('Cleaning Status: $cleaningStatus'),
-                    Text('Plumber: $plumberStatus'),
-                    Text('Electrician: $electricianStatus'),
-                    Text('Food Delivery: $foodDeliveryStatus'),
-                  ],
+              // Get house photos if available
+              List<String> photos = [];
+              if (houseData.containsKey('photosBase64') && 
+                  houseData['photosBase64'] is List) {
+                photos = List<String>.from(houseData['photosBase64']);
+              }
+
+              return Card(
+                margin: const EdgeInsets.only(bottom: 16),
+                elevation: 4,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (hasPending)
+                child: InkWell(
+                  onTap: () => _openHouseDetails(context, house),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // House photo section
                       Container(
-                        width: 12,
-                        height: 12,
-                        margin: const EdgeInsets.only(right: 8),
+                        height: 200,
                         decoration: BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
+                          color: Colors.grey[300],
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                        ),
+                        child: photos.isNotEmpty && photos.first.isNotEmpty
+                            ? ClipRRect(
+                                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                                child: Image.memory(
+                                  base64Decode(photos.first),
+                                  fit: BoxFit.cover,
+                                  width: double.infinity,
+                                ),
+                              )
+                            : Container(
+                                color: Colors.grey[300],
+                                child: const Icon(
+                                  Icons.home,
+                                  size: 80,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // House name and ID
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    house['name'] ?? 'No Name',
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                if (hasPending)
+                                  Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: const BoxDecoration(
+                                      color: Colors.red,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.warning,
+                                      color: Colors.white,
+                                      size: 16,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'ID: ${house.id}',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            // Status badges
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                _buildStatusBadge('Cleaning', cleaningStatus),
+                                _buildStatusBadge('Plumber', plumberStatus),
+                                _buildStatusBadge('Electrician', electricianStatus),
+                                _buildStatusBadge('Food', foodDeliveryStatus),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
-                    const Icon(Icons.arrow_forward_ios),
-                  ],
+                    ],
+                  ),
                 ),
-                onTap: () => _openHouseDetails(context, house),
               );
             },
           );
         },
       ),
-      // Remove the floating action button to prevent owners from adding houses
-      // floatingActionButton: FloatingActionButton(
-      //   onPressed: () => _goToAddHouse(context),
-      //   child: const Icon(Icons.add),
-      // ),
     );
   }
 }

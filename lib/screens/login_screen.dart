@@ -171,6 +171,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      Image.asset(
+                        'assets/images/logo.png',
+                        height: 150,
+                      ),
+                      const SizedBox(height: 20),
                       const Text('Login', style: TextStyle(fontSize: 32)),
                       const SizedBox(height: 20),
                       TextField(
