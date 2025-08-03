@@ -72,14 +72,29 @@ class OwnerHomeScreen extends StatelessWidget {
             itemCount: houses.length,
             itemBuilder: (context, index) {
               final house = houses[index];
-              final hasPending = (house.data() as Map<String, dynamic>)
-                      .containsKey('availabilityPending') &&
-                  ((house.data() as Map<String, dynamic>)['availabilityPending']
-                          as List)
-                      .isNotEmpty;
+              final houseData = house.data() as Map<String, dynamic>;
+              final hasPending = houseData.containsKey('availabilityPending') &&
+                  (houseData['availabilityPending'] as List).isNotEmpty;
+
+              // New: Get cleaning status and other service statuses
+              final cleaningStatus = houseData['cleaningStatus'] ?? 'unknown';
+              final plumberStatus = houseData['plumberStatus'] ?? 'none';
+              final electricianStatus = houseData['electricianStatus'] ?? 'none';
+              final foodDeliveryStatus = houseData['foodDeliveryStatus'] ?? 'none';
+
               return ListTile(
                 title: Text(house['name'] ?? 'No Name'),
-                subtitle: Text('ID: ${house.id}'),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('ID: ${house.id}'),
+                    const SizedBox(height: 4),
+                    Text('Cleaning Status: $cleaningStatus'),
+                    Text('Plumber: $plumberStatus'),
+                    Text('Electrician: $electricianStatus'),
+                    Text('Food Delivery: $foodDeliveryStatus'),
+                  ],
+                ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

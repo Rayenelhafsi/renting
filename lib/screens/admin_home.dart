@@ -93,37 +93,94 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     final ownerName = ownerDoc['name'] ?? 'No Name';
     final ownerPhone = ownerDoc['phone'] ?? 'No Phone';
 
+    final isSmallScreen = MediaQuery.of(context).size.width < 400;
+
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       elevation: 6,
       shadowColor: Colors.black54,
       color: Colors.white,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: const Color.fromARGB(255, 255, 171, 2), width: 2), // Red border like the contour
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Center(
-              child: QrImageView(
-                data: ownerDoc.id,
-                size: 100,
+            Stack(
+              children: [
+                Center(
+                  child: QrImageView(
+                    data: ownerDoc.id,
+                    size: isSmallScreen ? 80 : 100,
+                  ),
+                ),
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  child: IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.red, size: 24),
+                    tooltip: 'Delete Owner',
+                    onPressed: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Confirm Delete'),
+                          content: Text('Are you sure you want to delete owner "$ownerName"?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(false),
+                              child: const Text('Cancel'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(true),
+                              child: const Text('Delete'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true) {
+                        // Delete owner document
+                        await FirebaseFirestore.instance.collection('users').doc(ownerDoc.id).delete();
+                        // Optionally delete related houses
+                        for (var house in houses) {
+                          await FirebaseFirestore.instance.collection('houses').doc(house.id).delete();
+                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Owner "$ownerName" deleted')),
+                        );
+                        setState(() {});
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              ownerName,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: isSmallScreen ? 18 : 22,
+                fontWeight: FontWeight.bold,
+                color: Colors.black,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              ownerPhone,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: isSmallScreen ? 14 : 18,
+                color: Colors.black,
               ),
             ),
             const SizedBox(height: 12),
-            Center(
-              child: Text(ownerName,
-                  style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black)),
-            ),
-            const SizedBox(height: 8),
-            Center(
-              child: Text(ownerPhone,
-                  style: const TextStyle(fontSize: 18, color: Colors.black)),
-            ),
-            const SizedBox(height: 12),
             Wrap(
+              alignment: WrapAlignment.center,
               spacing: 8,
               runSpacing: 8,
               children: [
@@ -136,8 +193,13 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ActionChip(
-                        label: Text(house['name'],
-                            style: const TextStyle(color: Colors.black)),
+                        label: Text(
+                          house['name'],
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontSize: isSmallScreen ? 14 : 16,
+                          ),
+                        ),
                         backgroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           side: const BorderSide(color: Colors.black),
@@ -148,57 +210,44 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                         onPressed: () => _navigateToHouseDetails(house),
                       ),
                       if (hasPending)
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.check_circle,
-                                  color: Colors.green, size: 20),
-                              tooltip: 'Confirm pending changes',
-                              onPressed: () async {
-                                final ref = FirebaseFirestore.instance
-                                    .collection('houses')
-                                    .doc(house.id);
-                                final pendingAvailability =
-                                    houseData['availabilityPending']
-                                        as List<dynamic>;
-                                final pendingCleaning =
-                                    houseData['cleaningSchedulePending']
-                                            as List<dynamic>? ?? 
-                                        [];
-                                await ref.update({
-                                  'availability': pendingAvailability,
-                                  'cleaningSchedule': pendingCleaning,
-                                  'availabilityPending': [],
-                                  'cleaningSchedulePending': [],
-                                });
-                                setState(() {});
-                                // Notify user of update
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content: Text(
-                                          'Pending availability changes confirmed')),
-                                );
-                              },
-                            ),
-                          ],
+                        IconButton(
+                          icon: Icon(
+                            Icons.check_circle,
+                            color: Colors.green,
+                            size: isSmallScreen ? 18 : 20,
+                          ),
+                          tooltip: 'Confirm pending changes',
+                          onPressed: () async {
+                            final ref = FirebaseFirestore.instance
+                                .collection('houses')
+                                .doc(house.id);
+                            final pendingAvailability =
+                                houseData['availabilityPending'] as List<dynamic>;
+                            final pendingCleaning =
+                                houseData['cleaningSchedulePending'] as List<dynamic>? ?? [];
+                            await ref.update({
+                              'availability': pendingAvailability,
+                              'cleaningSchedule': pendingCleaning,
+                              'availabilityPending': [],
+                              'cleaningSchedulePending': [],
+                            });
+                            setState(() {});
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Pending availability changes confirmed'),
+                              ),
+                            );
+                          },
                         ),
                     ],
                   );
                 }).toList(),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    ElevatedButton(
-                      onPressed: () => _navigateToAddHouse(ownerDoc),
-                      child: const Text('Add House'),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: _navigateToCreateOwner,
-                      child: const Text('New Owner'),
-                    ),
-                  ],
+                ElevatedButton(
+                  onPressed: () => _navigateToAddHouse(ownerDoc),
+                  child: Text(
+                    'Add House',
+                    style: TextStyle(fontSize: isSmallScreen ? 14 : 16),
+                  ),
                 ),
               ],
             ),
@@ -229,26 +278,280 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           ),
         ],
       ),
-      body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _ownersWithHousesStream(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          body: StreamBuilder<List<Map<String, dynamic>>>(
+            stream: _ownersWithHousesStream(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text('No owners found.'));
-          }
+              if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                return const Center(child: Text('No owners found.'));
+              }
 
-          final ownersList = snapshot.data!;
-          return ListView.builder(
-            itemCount: ownersList.length,
-            itemBuilder: (context, index) {
-              return _buildOwnerCard(ownersList[index]);
+              final ownersList = snapshot.data!;
+              final filteredOwnersList = (_selectedOwnerId != null)
+                  ? ownersList.where((ownerData) {
+                      final ownerDoc = ownerData['owner'] as DocumentSnapshot;
+                      return ownerDoc.id == _selectedOwnerId;
+                    }).toList()
+                  : ownersList;
+
+              return ListView.builder(
+                padding: const EdgeInsets.all(8),
+                itemCount: filteredOwnersList.length,
+                itemBuilder: (context, index) {
+                  final ownerData = filteredOwnersList[index];
+                  return _buildOwnerCard(ownerData);
+                },
+              );
             },
-          );
-        },
+          ),
+      bottomNavigationBar: Container(
+        height: 80,
+        color: Colors.black,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+          // Combined row: All Owners, Select House, Select State, Assign Button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              // All Owners Dropdown
+              Expanded(
+                flex: 2,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      hint: const Text(
+                        'All Owners',
+                        style: TextStyle(color: Colors.white, fontSize: 10),
+                      ),
+                      value: _selectedOwnerId,
+                      items: _allOwnersDropdownItems(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedOwnerId = value;
+                          _selectedHouseFilter = null; // reset house filter when owner changes
+                          _selectedHouse = null; // reset selected house for assignment
+                        });
+                      },
+                      style: const TextStyle(color: Colors.white, fontSize: 10),
+                      iconEnabledColor: Colors.white,
+                      dropdownColor: Colors.grey[800],
+                      isExpanded: true,
+                    ),
+                  ),
+                ),
+              ),
+              // Select House Dropdown
+              Expanded(
+                flex: 3,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<DocumentSnapshot>(
+                      hint: const Text(
+                        'Select House',
+                        style: TextStyle(color: Colors.white, fontSize: 10),
+                      ),
+                      value: _selectedHouse,
+                      items: _allHousesDropdownItems(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedHouse = value;
+                          _selectedState = null;
+                        });
+                      },
+                      style: const TextStyle(color: Colors.white, fontSize: 10),
+                      iconEnabledColor: Colors.white,
+                      dropdownColor: Colors.grey[800],
+                      isExpanded: true,
+                    ),
+                  ),
+                ),
+              ),
+              // Select State Dropdown
+              Expanded(
+                flex: 2,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      hint: const Text(
+                        'Select State',
+                        style: TextStyle(color: Colors.white, fontSize: 10),
+                      ),
+                      value: _selectedState,
+                      items: _houseStatesDropdownItems(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedState = value;
+                        });
+                      },
+                      style: const TextStyle(color: Colors.white, fontSize: 10),
+                      iconEnabledColor: Colors.white,
+                      dropdownColor: Colors.grey[800],
+                      isExpanded: true,
+                    ),
+                  ),
+                ),
+              ),
+              // Assign State Button
+              Expanded(
+                flex: 1,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                  child: ElevatedButton(
+                    onPressed: (_selectedHouse != null && _selectedState != null)
+                        ? _assignStateToHouse
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.grey,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+                      minimumSize: const Size(0, 30),
+                    ),
+                    child: const Text(
+                      'Assign',
+                      style: TextStyle(fontSize: 10),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          ],
+        ),
       ),
     );
+  }
+
+  // New state variables for house state assignment
+  DocumentSnapshot? _selectedHouse;
+  String? _selectedState;
+  
+  // New state variables for filtering
+  String? _selectedOwnerId;
+  DocumentSnapshot? _selectedHouseFilter;
+  String? _selectedStateFilter;
+
+  // Helper to get all houses for dropdown
+  List<DropdownMenuItem<DocumentSnapshot>> _allHousesDropdownItems() {
+    // Flatten houses only for the selected owner
+    final allHouses = <DocumentSnapshot>[];
+    if (_selectedOwnerId != null) {
+      for (var owner in _ownersWithHouses) {
+        final ownerDoc = owner['owner'] as DocumentSnapshot;
+        if (ownerDoc.id == _selectedOwnerId) {
+          allHouses.addAll(owner['houses'] as List<DocumentSnapshot>);
+          break;
+        }
+      }
+    } else {
+      // If no owner selected, show all houses
+      for (var owner in _ownersWithHouses) {
+        allHouses.addAll(owner['houses'] as List<DocumentSnapshot>);
+      }
+    }
+    return allHouses.map((house) {
+      return DropdownMenuItem(
+        value: house,
+        child: Text(house['name'] ?? 'Unnamed House', style: const TextStyle(fontSize: 12)),
+      );
+    }).toList();
+  }
+  
+  // Helper to get all owners for dropdown
+  List<DropdownMenuItem<String>> _allOwnersDropdownItems() {
+    final allOwners = <Map<String, dynamic>>[];
+    for (var owner in _ownersWithHouses) {
+      final ownerDoc = owner['owner'] as DocumentSnapshot;
+      final ownerData = ownerDoc.data() as Map<String, dynamic>;
+      final String ownerName = (ownerData['name'] is String) 
+          ? ownerData['name'] as String 
+          : 'Unnamed Owner';
+      allOwners.add({
+        'id': ownerDoc.id,
+        'name': ownerName
+      });
+    }
+    return allOwners.map((owner) {
+      return DropdownMenuItem<String>(
+        value: owner['id'] as String,
+        child: Text(owner['name'] as String, style: const TextStyle(fontSize: 12)),
+      );
+    }).toList();
+  }
+
+  // Helper to get house states for dropdown
+  List<DropdownMenuItem<String>> _houseStatesDropdownItems() {
+    const states = [
+      'Cleaning Now',
+      'Done Cleaned',
+      'Plumber Assigned',
+      'Electrician Assigned',
+      'Food Delivery Assigned',
+    ];
+    return states.map((state) {
+      return DropdownMenuItem(
+        value: state,
+        child: Text(state, style: const TextStyle(fontSize: 12)),
+      );
+    }).toList();
+  }
+
+  // Store owners with houses for dropdown helper
+  List<Map<String, dynamic>> _ownersWithHouses = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _ownersWithHousesStream().listen((owners) {
+      setState(() {
+        _ownersWithHouses = owners;
+      });
+    });
+  }
+
+  // Assign selected state to selected house in Firestore
+  Future<void> _assignStateToHouse() async {
+    if (_selectedHouse == null || _selectedState == null) return;
+
+    final houseRef = FirebaseFirestore.instance.collection('houses').doc(_selectedHouse!.id);
+
+    // Map state string to Firestore field updates
+    Map<String, dynamic> updateData = {};
+
+    switch (_selectedState) {
+      case 'Cleaning Now':
+        updateData['cleaningStatus'] = 'cleaning';
+        break;
+      case 'Done Cleaned':
+        updateData['cleaningStatus'] = 'done';
+        break;
+      case 'Plumber Assigned':
+        updateData['plumberStatus'] = 'assigned';
+        break;
+      case 'Electrician Assigned':
+        updateData['electricianStatus'] = 'assigned';
+        break;
+      case 'Food Delivery Assigned':
+        updateData['foodDeliveryStatus'] = 'assigned';
+        break;
+    }
+
+    await houseRef.update(updateData);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('State "${_selectedState!}" assigned to house "${_selectedHouse!['name']}"')),
+    );
+
+    setState(() {
+      _selectedHouse = null;
+      _selectedState = null;
+    });
   }
 }
