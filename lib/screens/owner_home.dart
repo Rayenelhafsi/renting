@@ -51,13 +51,13 @@ class OwnerHomeScreen extends StatelessWidget {
     switch (status.toLowerCase()) {
       case 'cleaning':
       case 'assigned':
-        return Colors.orange;
+        return Colors.green[300]!;
       case 'done':
-        return Colors.green;
+        return Colors.green[700]!;
       case 'pending':
-        return Colors.red;
+        return Colors.green[100]!;
       default:
-        return Colors.grey;
+        return Colors.green[50]!;
     }
   }
 
@@ -142,12 +142,14 @@ class OwnerHomeScreen extends StatelessWidget {
               // Get cleaning status and other service statuses
               final cleaningStatus = houseData['cleaningStatus'] ?? 'unknown';
               final plumberStatus = houseData['plumberStatus'] ?? 'none';
-              final electricianStatus = houseData['electricianStatus'] ?? 'none';
-              final foodDeliveryStatus = houseData['foodDeliveryStatus'] ?? 'none';
+              final electricianStatus =
+                  houseData['electricianStatus'] ?? 'none';
+              final foodDeliveryStatus =
+                  houseData['foodDeliveryStatus'] ?? 'none';
 
               // Get house photos if available
               List<String> photos = [];
-              if (houseData.containsKey('photosBase64') && 
+              if (houseData.containsKey('photosBase64') &&
                   houseData['photosBase64'] is List) {
                 photos = List<String>.from(houseData['photosBase64']);
               }
@@ -168,12 +170,14 @@ class OwnerHomeScreen extends StatelessWidget {
                       Container(
                         height: 200,
                         decoration: BoxDecoration(
-                          color: Colors.grey[300],
-                          borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                          color: Colors.white,
+                          borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(12)),
                         ),
                         child: photos.isNotEmpty && photos.first.isNotEmpty
                             ? ClipRRect(
-                                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                                borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(12)),
                                 child: Image.memory(
                                   base64Decode(photos.first),
                                   fit: BoxFit.cover,
@@ -181,11 +185,11 @@ class OwnerHomeScreen extends StatelessWidget {
                                 ),
                               )
                             : Container(
-                                color: Colors.grey[300],
+                                color: Colors.white,
                                 child: const Icon(
                                   Icons.home,
                                   size: 80,
-                                  color: Colors.grey,
+                                  color: Colors.green,
                                 ),
                               ),
                       ),
@@ -227,9 +231,10 @@ class OwnerHomeScreen extends StatelessWidget {
                               'ID: ${house.id}',
                               style: const TextStyle(
                                 fontSize: 14,
-                                color: Colors.grey,
+                                color: Colors.green,
                               ),
                             ),
+
                             const SizedBox(height: 16),
                             // Status badges
                             Wrap(
@@ -238,7 +243,8 @@ class OwnerHomeScreen extends StatelessWidget {
                               children: [
                                 _buildStatusBadge('Cleaning', cleaningStatus),
                                 _buildStatusBadge('Plumber', plumberStatus),
-                                _buildStatusBadge('Electrician', electricianStatus),
+                                _buildStatusBadge(
+                                    'Electrician', electricianStatus),
                                 _buildStatusBadge('Food', foodDeliveryStatus),
                               ],
                             ),

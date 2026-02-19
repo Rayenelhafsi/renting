@@ -28,19 +28,19 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'House Rental Manager',
-      theme: ThemeData.dark().copyWith(
+      title: 'Proprietaires Dwira',
+      theme: ThemeData.light().copyWith(
         useMaterial3: true,
-        textTheme: ThemeData.dark().textTheme.apply(
-          bodyColor: Colors.white,
-          displayColor: Colors.white,
-          fontFamily: 'Cinzel',
-        ),
-        colorScheme: ColorScheme.dark(
-          primary: Colors.white,
+        textTheme: ThemeData.light().textTheme.apply(
+              bodyColor: Colors.green,
+              displayColor: Colors.green,
+              fontFamily: 'Cinzel',
+            ),
+        colorScheme: ColorScheme.light(
+          primary: Colors.green,
           onPrimary: Colors.white,
-          background: Colors.black,
-          onBackground: Colors.white,
+          background: Colors.white,
+          onBackground: Colors.green,
         ),
       ),
       home: const SplashScreen(),
@@ -55,7 +55,8 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
   bool _visible = true;
@@ -92,7 +93,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.white,
       body: Center(
         child: FadeTransition(
           opacity: _animation,

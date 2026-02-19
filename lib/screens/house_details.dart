@@ -48,8 +48,11 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
         widget.house['cleaningSchedule'].cast<String>().toSet();
 
     final data = widget.house.data() as Map<String, dynamic>? ?? {};
-    photos = List<String>.from(data.containsKey('photosBase64') ? data['photosBase64'] : []);
-    price = (data.containsKey('price') && data['price'] != null) ? (data['price'] as num).toDouble() : null;
+    photos = List<String>.from(
+        data.containsKey('photosBase64') ? data['photosBase64'] : []);
+    price = (data.containsKey('price') && data['price'] != null)
+        ? (data['price'] as num).toDouble()
+        : null;
     noteController.text = data.containsKey('note') ? data['note'] : '';
 
     _pageController = PageController(initialPage: 0);
@@ -81,17 +84,25 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   }
 
   Future<void> reloadData() async {
-    final doc = await FirebaseFirestore.instance.collection('houses').doc(widget.house.id).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('houses')
+        .doc(widget.house.id)
+        .get();
     final data = doc.data() as Map<String, dynamic>? ?? {};
     if (data.isNotEmpty) {
       setState(() {
         availableDates = _parseDates(data['availability'] ?? []);
         cleaningDates = _parseDates(data['cleaningSchedule'] ?? []);
-        _updatedAvailability = (data['availability'] ?? []).cast<String>().toSet();
-        _updatedCleaningSchedule = (data['cleaningSchedule'] ?? []).cast<String>().toSet();
+        _updatedAvailability =
+            (data['availability'] ?? []).cast<String>().toSet();
+        _updatedCleaningSchedule =
+            (data['cleaningSchedule'] ?? []).cast<String>().toSet();
 
-        photos = List<String>.from(data.containsKey('photosBase64') ? data['photosBase64'] : []);
-        price = (data.containsKey('price') && data['price'] != null) ? (data['price'] as num).toDouble() : null;
+        photos = List<String>.from(
+            data.containsKey('photosBase64') ? data['photosBase64'] : []);
+        price = (data.containsKey('price') && data['price'] != null)
+            ? (data['price'] as num).toDouble()
+            : null;
         noteController.text = data.containsKey('note') ? data['note'] : '';
       });
     }
@@ -100,7 +111,10 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   Future<void> _fetchUserRole() async {
     String? role;
     if (widget.ownerId != null) {
-      final ownerDoc = await FirebaseFirestore.instance.collection('users').doc(widget.ownerId).get();
+      final ownerDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.ownerId)
+          .get();
       final ownerData = ownerDoc.data();
       if (ownerData != null && ownerData.containsKey('role')) {
         final roleField = ownerData['role'];
@@ -111,7 +125,10 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     } else {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
-        final userDocSnapshot = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        final userDocSnapshot = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
         var userData = userDocSnapshot.data();
 
         if (userData != null && userData.containsKey('role')) {
@@ -137,7 +154,6 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
-
   Widget _buildCalendarCell(DateTime day) {
     final dateStr = DateFormat('yyyy-MM-dd').format(day);
     final isAvailable = _updatedAvailability.contains(dateStr);
@@ -147,15 +163,19 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
       margin: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: isAvailable
-            ? Colors.green[300]
-            : Colors.red[300], // Unavailable dates shown in red
+            ? Colors.green[200]
+            : Colors.grey[300], // Unavailable dates shown in grey
         shape: BoxShape.circle,
       ),
       alignment: Alignment.center,
-      child: Text('${day.day}'),
+      child: Text(
+        '${day.day}',
+        style: TextStyle(
+          color: isAvailable ? Colors.green[800] : Colors.grey[600],
+        ),
+      ),
     );
   }
-
 
   void _toggleDate(Set<String> set, DateTime date) {
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
@@ -163,7 +183,8 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   }
 
   Future<void> _saveNote() async {
-    final ref = FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
+    final ref =
+        FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
     try {
       await ref.update({'note': noteController.text});
       ScaffoldMessenger.of(context).showSnackBar(
@@ -185,7 +206,8 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     final base64Image = base64Encode(bytes);
 
     try {
-      final ref = FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
+      final ref =
+          FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
       photos.add(base64Image);
       await ref.update({'photosBase64': photos});
 
@@ -203,7 +225,8 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
   Future<void> _confirmChanges() async {
     if (_userRole == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User role not determined yet. Please try again.')),
+        const SnackBar(
+            content: Text('User role not determined yet. Please try again.')),
       );
       return;
     }
@@ -230,11 +253,13 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
           cleaningDates = _parseDates(_updatedCleaningSchedule.toList());
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Availability changes updated successfully')),
+          const SnackBar(
+              content: Text('Availability changes updated successfully')),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('User role not authorized to confirm changes')),
+          const SnackBar(
+              content: Text('User role not authorized to confirm changes')),
         );
       }
     } catch (e) {
@@ -258,39 +283,39 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
             // Photo carousel or upload button
             Container(
               height: 250,
-              color: Colors.grey[200],
-            child: Stack(
-              children: [
-                PageView.builder(
-                  controller: _pageController,
-                  itemCount: photos.length,
-                  itemBuilder: (context, index) {
-                    try {
-                      final decodedBytes = base64Decode(photos[index]);
-                      return Image.memory(
-                        decodedBytes,
-                        fit: BoxFit.cover,
-                      );
-                    } catch (e) {
-                      return const Center(child: Icon(Icons.broken_image));
-                    }
-                  },
-                ),
-                Positioned(
-                  right: 8,
-                  bottom: 8,
-                  child: ElevatedButton.icon(
-                    onPressed: _uploadPhoto,
-                    icon: const Icon(Icons.upload),
-                    label: const Text('Upload Photos'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black54,
-                      foregroundColor: Colors.white,
+              color: Colors.white,
+              child: Stack(
+                children: [
+                  PageView.builder(
+                    controller: _pageController,
+                    itemCount: photos.length,
+                    itemBuilder: (context, index) {
+                      try {
+                        final decodedBytes = base64Decode(photos[index]);
+                        return Image.memory(
+                          decodedBytes,
+                          fit: BoxFit.cover,
+                        );
+                      } catch (e) {
+                        return const Center(child: Icon(Icons.broken_image));
+                      }
+                    },
+                  ),
+                  Positioned(
+                    right: 8,
+                    bottom: 8,
+                    child: ElevatedButton.icon(
+                      onPressed: _uploadPhoto,
+                      icon: const Icon(Icons.upload),
+                      label: const Text('Upload Photos'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
             ),
             const SizedBox(height: 8),
             // Price display
@@ -304,7 +329,7 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: Colors.blueAccent,
+                      color: Colors.green,
                     ),
                   ),
                 ),
@@ -330,12 +355,13 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
                         },
                         calendarStyle: const CalendarStyle(
                           todayDecoration: BoxDecoration(
-                            color: Colors.orange,
+                            color: Colors.green,
                             shape: BoxShape.circle,
                           ),
                         ),
                         calendarBuilders: CalendarBuilders(
-                          defaultBuilder: (context, day, _) => _buildCalendarCell(day),
+                          defaultBuilder: (context, day, _) =>
+                              _buildCalendarCell(day),
                         ),
                         onDaySelected: (selectedDay, _) {
                           setState(() {
@@ -396,7 +422,7 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
                 },
                 calendarStyle: const CalendarStyle(
                   todayDecoration: BoxDecoration(
-                    color: Colors.orange,
+                    color: Colors.green,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -418,7 +444,9 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
             Padding(
               padding: const EdgeInsets.all(8.0),
               child: ElevatedButton(
-                onPressed: (_isLoadingRole || _userRole == null) ? null : _confirmChanges,
+                onPressed: (_isLoadingRole || _userRole == null)
+                    ? null
+                    : _confirmChanges,
                 child: _isLoadingRole
                     ? const SizedBox(
                         width: 20,
