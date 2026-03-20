@@ -150,33 +150,6 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
     return dates.map((d) => DateTime.parse(d)).toList();
   }
 
-  bool _isSameDay(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month && a.day == b.day;
-  }
-
-  Widget _buildCalendarCell(DateTime day) {
-    final dateStr = DateFormat('yyyy-MM-dd').format(day);
-    final isAvailable = _updatedAvailability.contains(dateStr);
-    // final isCleaning = _updatedCleaningSchedule.contains(dateStr);
-
-    return Container(
-      margin: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: isAvailable
-            ? Colors.green[200]
-            : Colors.grey[300], // Unavailable dates shown in grey
-        shape: BoxShape.circle,
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        '${day.day}',
-        style: TextStyle(
-          color: isAvailable ? Colors.green[800] : Colors.grey[600],
-        ),
-      ),
-    );
-  }
-
   void _toggleDate(Set<String> set, DateTime date) {
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
     set.contains(dateStr) ? set.remove(dateStr) : set.add(dateStr);
@@ -271,80 +244,407 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
 
   DateTime _focusedDay = DateTime.now();
 
+  String get _houseName {
+    final data = widget.house.data() as Map<String, dynamic>? ?? {};
+    return (data['name'] ?? data['titre'] ?? 'Bien').toString();
+  }
+
+  String get _locationLabel {
+    final data = widget.house.data() as Map<String, dynamic>? ?? {};
+    return (data['location'] ??
+            data['zone_nom'] ??
+            data['quartier'] ??
+            data['adresse'] ??
+            'Kelibia, Nabeul')
+        .toString();
+  }
+
+  Widget _buildHeroSection(BuildContext context) {
+    return SizedBox(
+      height: 320,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (photos.isNotEmpty)
+            PageView.builder(
+              controller: _pageController,
+              itemCount: photos.length,
+              itemBuilder: (context, index) {
+                try {
+                  final decodedBytes = base64Decode(photos[index]);
+                  return Image.memory(
+                    decodedBytes,
+                    fit: BoxFit.cover,
+                  );
+                } catch (_) {
+                  return Container(
+                    color: const Color(0xFFE8ECF0),
+                    child: const Icon(Icons.broken_image, size: 48),
+                  );
+                }
+              },
+            )
+          else
+            Container(
+              color: const Color(0xFFE8ECF0),
+              child: const Icon(
+                Icons.home_work_outlined,
+                size: 70,
+                color: Color(0xFF2F7D4B),
+              ),
+            ),
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0x66000000), Color(0xAA000000)],
+              ),
+            ),
+          ),
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            left: 12,
+            child: _circleActionButton(
+              icon: Icons.arrow_back,
+              onTap: () => Navigator.of(context).pop(),
+            ),
+          ),
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            right: 12,
+            child: Row(
+              children: [
+                _circleActionButton(icon: Icons.share_outlined, onTap: () {}),
+                const SizedBox(width: 8),
+                _circleActionButton(icon: Icons.favorite_border, onTap: () {}),
+              ],
+            ),
+          ),
+          Positioned(
+            right: 14,
+            bottom: 14,
+            child: ElevatedButton.icon(
+              onPressed: _uploadPhoto,
+              icon: const Icon(Icons.upload, size: 16),
+              label: const Text('UPLOAD PHOTOS'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2F7D4B),
+                foregroundColor: Colors.white,
+                elevation: 3,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _circleActionButton({
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.36),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+        ),
+        child: Icon(icon, color: Colors.white, size: 20),
+      ),
+    );
+  }
+
+  Widget _metaChip({
+    required IconData icon,
+    required String label,
+    Color background = const Color(0xFFF4F6F8),
+    Color foreground = const Color(0xFF4B5563),
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: foreground),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: foreground,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCalendarDay(DateTime day, DateTime focusedDay) {
+    final dateStr = DateFormat('yyyy-MM-dd').format(day);
+    final isAvailable = _updatedAvailability.contains(dateStr);
+    final isToday = isSameDay(day, DateTime.now());
+    final isOutsideMonth = day.month != focusedDay.month;
+
+    Color background;
+    Color textColor;
+
+    if (isOutsideMonth) {
+      background = Colors.transparent;
+      textColor = const Color(0xFFA8A8A8);
+    } else if (isAvailable) {
+      background = const Color(0xFF2F7D4B);
+      textColor = Colors.white;
+    } else {
+      background = const Color(0xFFE77777);
+      textColor = Colors.white;
+    }
+
+    return Center(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: background,
+          shape: BoxShape.circle,
+          border: isToday
+              ? Border.all(color: const Color(0xFF0F5132), width: 2)
+              : null,
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          '${day.day}',
+          style: TextStyle(
+            color: textColor,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.house['name'] ?? 'No Name'),
-      ),
+      backgroundColor: const Color(0xFFF3F0F6),
       body: SingleChildScrollView(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Photo carousel or upload button
-            Container(
-              height: 250,
-              color: Colors.white,
-              child: Stack(
-                children: [
-                  PageView.builder(
-                    controller: _pageController,
-                    itemCount: photos.length,
-                    itemBuilder: (context, index) {
-                      try {
-                        final decodedBytes = base64Decode(photos[index]);
-                        return Image.memory(
-                          decodedBytes,
-                          fit: BoxFit.cover,
-                        );
-                      } catch (e) {
-                        return const Center(child: Icon(Icons.broken_image));
-                      }
-                    },
-                  ),
-                  Positioned(
-                    right: 8,
-                    bottom: 8,
-                    child: ElevatedButton.icon(
-                      onPressed: _uploadPhoto,
-                      icon: const Icon(Icons.upload),
-                      label: const Text('Upload Photos'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
+            _buildHeroSection(context),
+            Transform.translate(
+              offset: const Offset(0, -22),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF8F8FA),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                ),
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 60,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD5D7DD),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            // Price display
-            if (price != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '\$${price!.toStringAsFixed(2)} / month',
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green,
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE6F6EE),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: const Text(
+                        'SEJOUR PREMIUM',
+                        style: TextStyle(
+                          color: Color(0xFF2F7D4B),
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.3,
+                          fontSize: 11,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              ),
-            const SizedBox(height: 8),
-            // Book button
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: ElevatedButton(
-                onPressed: () {
-                  // Navigate to calendar or booking screen (reuse current calendar UI)
-                  showModalBottomSheet(
-                    context: context,
-                    builder: (_) => SizedBox(
-                      height: 400,
+                    const SizedBox(height: 12),
+                    Text(
+                      _houseName,
+                      style: const TextStyle(
+                        fontSize: 35,
+                        height: 1.05,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        _metaChip(icon: Icons.location_on_outlined, label: _locationLabel),
+                        _metaChip(
+                          icon: Icons.star_rounded,
+                          label: '4.7 (31 avis)',
+                          background: const Color(0xFFFDF2DF),
+                          foreground: const Color(0xFF9A6700),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {},
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: const Color(0xFF2F7D4B),
+                              elevation: 0,
+                              side: const BorderSide(
+                                color: Color(0xFFAEE2C8),
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                            child: const Text(
+                              'BOOK THE APARTMENT',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        ElevatedButton(
+                          onPressed:
+                              (_isLoadingRole || _userRole == null) ? null : _confirmChanges,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2F7D4B),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                          ),
+                          child: _isLoadingRole
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.check),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: const Color(0xFFE9ECF1)),
+                      ),
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'NOTES',
+                            style: TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF0F5132),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: noteController,
+                            maxLines: 5,
+                            decoration: InputDecoration(
+                              hintText: 'Ecrivez vos notes ici',
+                              filled: true,
+                              fillColor: const Color(0xFFF8FAFC),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFFD8E4DC),
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFFD8E4DC),
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFF2F7D4B),
+                                  width: 1.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: ElevatedButton(
+                              onPressed: _saveNote,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.white,
+                                foregroundColor: const Color(0xFF2F7D4B),
+                                elevation: 0,
+                                side: const BorderSide(color: Color(0xFFAEE2C8)),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                              child: const Text('SAVE NOTE'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: const Color(0xFFE9ECF1)),
+                      ),
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
                       child: TableCalendar(
                         focusedDay: _focusedDay,
                         firstDay: DateTime.utc(2024),
@@ -353,16 +653,49 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
                         availableCalendarFormats: const {
                           CalendarFormat.month: 'Month',
                         },
-                        calendarStyle: const CalendarStyle(
-                          todayDecoration: BoxDecoration(
-                            color: Colors.green,
-                            shape: BoxShape.circle,
+                        locale: 'en_US',
+                        headerStyle: const HeaderStyle(
+                          titleCentered: true,
+                          formatButtonVisible: false,
+                          titleTextStyle: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF285D3A),
+                            letterSpacing: 0.4,
+                          ),
+                          leftChevronIcon: Icon(
+                            Icons.chevron_left,
+                            color: Color(0xFF111827),
+                            size: 28,
+                          ),
+                          rightChevronIcon: Icon(
+                            Icons.chevron_right,
+                            color: Color(0xFF111827),
+                            size: 28,
+                          ),
+                        ),
+                        daysOfWeekStyle: const DaysOfWeekStyle(
+                          weekdayStyle: TextStyle(
+                            color: Color(0xFF8E8E8E),
+                            fontWeight: FontWeight.w500,
+                          ),
+                          weekendStyle: TextStyle(
+                            color: Color(0xFF8E8E8E),
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                         calendarBuilders: CalendarBuilders(
-                          defaultBuilder: (context, day, _) =>
-                              _buildCalendarCell(day),
+                          defaultBuilder: (context, day, focusedDay) =>
+                              _buildCalendarDay(day, focusedDay),
+                          todayBuilder: (context, day, focusedDay) =>
+                              _buildCalendarDay(day, focusedDay),
+                          outsideBuilder: (context, day, focusedDay) =>
+                              _buildCalendarDay(day, focusedDay),
                         ),
+                        selectedDayPredicate: (day) =>
+                            _updatedAvailability.contains(
+                              DateFormat('yyyy-MM-dd').format(day),
+                            ),
                         onDaySelected: (selectedDay, _) {
                           setState(() {
                             _toggleDate(_updatedAvailability, selectedDay);
@@ -375,90 +708,58 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
                         },
                       ),
                     ),
-                  );
-                },
-                child: const Text('Book The Apartment'),
-              ),
-            ),
-            const SizedBox(height: 8),
-            // Note-taking area
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Notes',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 4),
-                  TextField(
-                    controller: noteController,
-                    maxLines: 5,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      hintText: 'Enter your notes here',
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      children: const [
+                        _CalendarLegend(
+                          color: Color(0xFF2F7D4B),
+                          label: 'Disponible',
+                        ),
+                        _CalendarLegend(
+                          color: Color(0xFFE77777),
+                          label: 'Reserve / indisponible',
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  ElevatedButton(
-                    onPressed: _saveNote,
-                    child: const Text('Save Note'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            // Existing calendar availability UI
-            SizedBox(
-              height: 400,
-              child: TableCalendar(
-                focusedDay: _focusedDay,
-                firstDay: DateTime.utc(2024),
-                lastDay: DateTime.utc(2030),
-                calendarFormat: CalendarFormat.month,
-                availableCalendarFormats: const {
-                  CalendarFormat.month: 'Month',
-                },
-                calendarStyle: const CalendarStyle(
-                  todayDecoration: BoxDecoration(
-                    color: Colors.green,
-                    shape: BoxShape.circle,
-                  ),
+                  ],
                 ),
-                calendarBuilders: CalendarBuilders(
-                  defaultBuilder: (context, day, _) => _buildCalendarCell(day),
-                ),
-                onDaySelected: (selectedDay, _) {
-                  setState(() {
-                    _toggleDate(_updatedAvailability, selectedDay);
-                  });
-                },
-                onPageChanged: (focusedDay) {
-                  setState(() {
-                    _focusedDay = focusedDay;
-                  });
-                },
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: ElevatedButton(
-                onPressed: (_isLoadingRole || _userRole == null)
-                    ? null
-                    : _confirmChanges,
-                child: _isLoadingRole
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Confirm Availability Changes'),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _CalendarLegend extends StatelessWidget {
+  final Color color;
+  final String label;
+
+  const _CalendarLegend({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Color(0xFF4B5563),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
     );
   }
 }

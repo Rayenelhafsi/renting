@@ -1,13 +1,17 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import '../main.dart';
-import 'house_details.dart';
-import 'admin_qr_code_screen.dart';
-import 'login_screen.dart';
+
+import '../config/app_config.dart';
+import '../services/dwira_api_service.dart';
 import 'add_house_screen.dart';
+import 'api_admin_bien_details_screen.dart';
 import 'create_owner_screen.dart';
+import 'house_details.dart';
+import 'login_screen.dart';
 
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
@@ -17,6 +21,36 @@ class AdminHomeScreen extends StatefulWidget {
 }
 
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
+  final DwiraApiService _api = DwiraApiService.instance;
+
+  Future<List<_ApiOwner>>? _apiOwnersFuture;
+  Future<List<Map<String, dynamic>>>? _approvalRequestsFuture;
+  Future<List<Map<String, dynamic>>>? _approvalHistoryFuture;
+  Future<List<Map<String, dynamic>>>? _chatMessagesFuture;
+  Future<List<Map<String, dynamic>>>? _notificationsFuture;
+  Future<List<Map<String, dynamic>>>? _communicationNotificationsFuture;
+
+  final TextEditingController _chatMessageController = TextEditingController();
+  bool _sendingAdminMessage = false;
+  String? _selectedChatOwnerId;
+  String? _selectedChatBienId;
+  String? _selectedChatPropertyTitle;
+  _AdminNotificationFilter _notificationFilter = _AdminNotificationFilter.all;
+  _ApprovalTabFilter _approvalTabFilter = _ApprovalTabFilter.pending;
+  final Set<String> _processedApprovalIds = <String>{};
+  final Map<String, Map<String, dynamic>> _localApprovalPayloads =
+      <String, Map<String, dynamic>>{};
+  Timer? _autoRefreshTimer;
+
+  Future<void> _openApiHouseDetails(_ApiHouse house) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ApiAdminBienDetailsScreen(bienId: house.id),
+      ),
+    );
+  }
+
   Stream<List<Map<String, dynamic>>> _ownersWithHousesStream() {
     final usersStream = FirebaseFirestore.instance
         .collection('users')
@@ -29,7 +63,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     return usersStream.asyncMap((usersSnapshot) async {
       final housesSnapshot = await housesStream.first;
 
-      // Map ownerId to list of houses
       final Map<String, List<DocumentSnapshot>> ownerHousesMap = {};
       for (var house in housesSnapshot.docs) {
         final ownerId = house['ownerId'];
@@ -50,32 +83,96 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     });
   }
 
+  @override
+  void initState() {
+    super.initState();
+    if (AppConfig.useDwiraApi) {
+      _refreshAllApiTabs();
+      _startAutoRefresh();
+    }
+  }
+
+  @override
+  void dispose() {
+    _autoRefreshTimer?.cancel();
+    _chatMessageController.dispose();
+    super.dispose();
+  }
+
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+      if (!mounted || !AppConfig.useDwiraApi) return;
+      _refreshRealtimeData();
+    });
+  }
+
+  void _refreshRealtimeData() {
+    setState(() {
+      _approvalRequestsFuture =
+          _api.fetchCalendarUpdateRequestsAdmin(statuses: {'pending'});
+      _approvalHistoryFuture = _api.fetchCalendarUpdateHistoryAdmin();
+      _notificationsFuture = _api.fetchNotificationsAdmin();
+      _communicationNotificationsFuture =
+          _api.fetchCommunicationNotificationsAdmin();
+      _apiOwnersFuture = _fetchApiOwnersWithHouses();
+      if ((_selectedChatOwnerId ?? '').trim().isNotEmpty) {
+        _chatMessagesFuture = _api.fetchOwnerChatMessages(
+          _selectedChatOwnerId!.trim(),
+          bienId: (_selectedChatBienId ?? '').trim().isEmpty
+              ? null
+              : _selectedChatBienId,
+        );
+      }
+    });
+  }
+
+  void _refreshAllApiTabs() {
+    setState(() {
+      _apiOwnersFuture = _fetchApiOwnersWithHouses();
+      _approvalRequestsFuture =
+          _api.fetchCalendarUpdateRequestsAdmin(statuses: {'pending'});
+      _approvalHistoryFuture = _api.fetchCalendarUpdateHistoryAdmin();
+      _notificationsFuture = _api.fetchNotificationsAdmin();
+      _communicationNotificationsFuture =
+          _api.fetchCommunicationNotificationsAdmin();
+      if ((_selectedChatOwnerId ?? '').trim().isNotEmpty) {
+        _chatMessagesFuture = _api.fetchOwnerChatMessages(
+          _selectedChatOwnerId!.trim(),
+          bienId: (_selectedChatBienId ?? '').trim().isEmpty
+              ? null
+              : _selectedChatBienId,
+        );
+      }
+    });
+  }
+
+  void _refreshChatThread() {
+    final ownerId = (_selectedChatOwnerId ?? '').trim();
+    if (ownerId.isEmpty) {
+      setState(() => _chatMessagesFuture = null);
+      return;
+    }
+    setState(() {
+      _chatMessagesFuture = _api.fetchOwnerChatMessages(
+        ownerId,
+        bienId: (_selectedChatBienId ?? '').trim().isEmpty
+            ? null
+            : _selectedChatBienId,
+      );
+    });
+  }
+
   void _logout(BuildContext context) async {
+    if (AppConfig.useDwiraApi) {
+      await _api.logoutAdmin();
+    }
     await FirebaseAuth.instance.signOut();
+    if (!context.mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (context) => const LoginScreen()),
       (route) => false,
     );
-  }
-
-  void _navigateToAddHouse(DocumentSnapshot ownerDoc) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AddHouseScreen(ownerId: ownerDoc.id),
-      ),
-    );
-  }
-
-  Future<void> _navigateToHouseDetails(DocumentSnapshot houseDoc) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => HouseDetailsScreen(house: houseDoc),
-      ),
-    );
-    // After returning from house details, refresh the state to update UI
-    setState(() {});
   }
 
   void _navigateToCreateOwner() {
@@ -84,184 +181,314 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       MaterialPageRoute(
         builder: (_) => const CreateOwnerScreen(),
       ),
-    );
+    ).then((_) => _refreshAllApiTabs());
   }
 
-  Widget _buildOwnerCard(Map<String, dynamic> ownerData) {
-    final ownerDoc = ownerData['owner'] as DocumentSnapshot;
-    final houses = ownerData['houses'] as List<DocumentSnapshot>;
+  void _navigateToAddHouseOwner(_ApiOwner owner) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddHouseScreen(ownerId: owner.id),
+      ),
+    ).then((_) => _refreshAllApiTabs());
+  }
 
-    final ownerName = ownerDoc['name'] ?? 'No Name';
-    final ownerPhone = ownerDoc['phone'] ?? 'No Phone';
+  Future<void> _sendAdminMessage() async {
+    final ownerId = (_selectedChatOwnerId ?? '').trim();
+    final bienId = (_selectedChatBienId ?? '').trim();
+    final propertyTitle = (_selectedChatPropertyTitle ?? '').trim();
+    final text = _chatMessageController.text.trim();
+    if (ownerId.isEmpty || text.isEmpty) return;
 
-    final isSmallScreen = MediaQuery.of(context).size.width < 400;
+    setState(() => _sendingAdminMessage = true);
+    try {
+      await _api.sendAdminChatMessage(
+        ownerId: ownerId,
+        text: text,
+        bienId: bienId.isEmpty ? null : bienId,
+        propertyTitle: propertyTitle.isEmpty ? null : propertyTitle,
+      );
+      await _api.createNotificationAdmin(
+        type: 'info',
+        message:
+            'Message admin envoyé au proprietaire $ownerId${bienId.isEmpty ? '' : ' (bien $bienId)'}',
+      );
+      _chatMessageController.clear();
+      _refreshChatThread();
+      setState(() {
+        _communicationNotificationsFuture =
+            _api.fetchCommunicationNotificationsAdmin();
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Message admin envoye.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Echec envoi message admin: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _sendingAdminMessage = false);
+    }
+  }
 
+  Future<void> _approveCalendarRequest(Map<String, dynamic> request) async {
+    final interactionId = (request['id'] ?? '').toString().trim();
+    if (interactionId.isEmpty) return;
+    try {
+      await _api.approveCalendarRequestAdmin(interactionId);
+      if (mounted) {
+        setState(() {
+          _processedApprovalIds.add(interactionId);
+          final metadata = (request['metadata'] is Map)
+              ? Map<String, dynamic>.from(request['metadata'] as Map)
+              : <String, dynamic>{};
+          metadata['status'] = 'approved';
+          metadata['reviewedAt'] = DateTime.now().toIso8601String();
+          final next = Map<String, dynamic>.from(request);
+          next['metadata'] = metadata;
+          _localApprovalPayloads[interactionId] = next;
+          _approvalHistoryFuture = _api.fetchCalendarUpdateHistoryAdmin();
+        });
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Demande approuvee et calendrier mis a jour.')),
+      );
+      _refreshAllApiTabs();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Echec approbation: $e')),
+      );
+    }
+  }
+
+  Future<void> _rejectCalendarRequest(Map<String, dynamic> request) async {
+    final interactionId = (request['id'] ?? '').toString().trim();
+    if (interactionId.isEmpty) return;
+    try {
+      await _api.rejectCalendarRequestAdmin(interactionId);
+      if (mounted) {
+        setState(() {
+          _processedApprovalIds.add(interactionId);
+          final metadata = (request['metadata'] is Map)
+              ? Map<String, dynamic>.from(request['metadata'] as Map)
+              : <String, dynamic>{};
+          metadata['status'] = 'rejected';
+          metadata['reviewedAt'] = DateTime.now().toIso8601String();
+          final next = Map<String, dynamic>.from(request);
+          next['metadata'] = metadata;
+          _localApprovalPayloads[interactionId] = next;
+          _approvalHistoryFuture = _api.fetchCalendarUpdateHistoryAdmin();
+        });
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Demande rejetee.')),
+      );
+      _refreshAllApiTabs();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Echec rejet: $e')),
+      );
+    }
+  }
+
+  Future<List<_ApiOwner>> _fetchApiOwnersWithHouses() async {
+    final results = await Future.wait<List<Map<String, dynamic>>>([
+      _api.fetchBiens(),
+      _api.fetchProprietairesAdmin(),
+    ]);
+    final biens = results[0];
+    final proprietaires = results[1];
+
+    final ownerInfoById = <String, Map<String, String>>{};
+    final ownerInfoByIdUpper = <String, Map<String, String>>{};
+    for (final owner in proprietaires) {
+      final id = (owner['id'] ?? '').toString().trim();
+      if (id.isEmpty) continue;
+      final payload = <String, String>{
+        'nom': (owner['nom'] ?? '').toString().trim(),
+        'telephone': (owner['telephone'] ?? '').toString().trim(),
+      };
+      ownerInfoById[id] = payload;
+      ownerInfoByIdUpper[id.toUpperCase()] = payload;
+    }
+
+    final ownersById = <String, _ApiOwnerBuilder>{};
+    for (final map in biens) {
+      final ownerId = (map['proprietaire_id'] ?? '').toString().trim();
+      if (ownerId.isEmpty) continue;
+
+      final ownerRef = ownerInfoById[ownerId] ??
+          ownerInfoByIdUpper[ownerId.toUpperCase()] ??
+          const <String, String>{};
+      final ownerName =
+          (map['proprietaire_nom'] ?? ownerRef['nom'] ?? 'Proprietaire')
+              .toString()
+              .trim();
+      final ownerPhone = (map['proprietaire_telephone'] ??
+              map['proprietaire_phone'] ??
+              map['owner_phone'] ??
+              map['phone'] ??
+              ownerRef['telephone'] ??
+              map['telephone'] ??
+              '')
+          .toString()
+          .trim();
+      final houseTitle =
+          (map['titre'] ?? map['reference'] ?? 'Bien').toString().trim();
+      final houseId = (map['id'] ?? '').toString().trim();
+      if (houseId.isEmpty) continue;
+
+      ownersById.putIfAbsent(
+        ownerId,
+        () => _ApiOwnerBuilder(
+          id: ownerId,
+          name: ownerName.isEmpty ? 'Proprietaire' : ownerName,
+          phone: ownerPhone,
+        ),
+      );
+      ownersById[ownerId]!
+          .houses
+          .add(_ApiHouse(id: houseId, title: houseTitle));
+    }
+
+    final owners = ownersById.values
+        .map((builder) => _ApiOwner(
+              id: builder.id,
+              name: builder.name,
+              phone: builder.phone,
+              houses: builder.houses,
+            ))
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+    return owners;
+  }
+
+  Widget _buildApiOwnerCard(_ApiOwner owner) {
+    final isSmallScreen = MediaQuery.of(context).size.width < 420;
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-      elevation: 6,
-      shadowColor: Colors.black54,
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      elevation: 2.5,
+      shadowColor: const Color(0x1F0F172A),
       color: Colors.white,
       shape: RoundedRectangleBorder(
-        side: BorderSide(color: Colors.green, width: 2), // Green border
-        borderRadius: BorderRadius.circular(12),
+        side:
+            BorderSide(color: const Color(0xFF2F7D4B).withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(18),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Stack(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Center(
+                Container(
+                  width: isSmallScreen ? 78 : 88,
+                  height: isSmallScreen ? 78 : 88,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                  ),
                   child: QrImageView(
-                    data: ownerDoc.id,
-                    size: isSmallScreen ? 80 : 100,
+                    data: owner.id,
+                    size: isSmallScreen ? 62 : 72,
                   ),
                 ),
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  child: IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red, size: 24),
-                    tooltip: 'Delete Owner',
-                    onPressed: () async {
-                      final confirm = await showDialog<bool>(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Confirm Delete'),
-                          content: Text(
-                              'Are you sure you want to delete owner "$ownerName"?'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(context).pop(false),
-                              child: const Text('Cancel'),
-                            ),
-                            TextButton(
-                              onPressed: () => Navigator.of(context).pop(true),
-                              child: const Text('Delete'),
-                            ),
-                          ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        owner.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: isSmallScreen ? 18 : 20,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF1F2937),
+                          height: 1.1,
                         ),
-                      );
-                      if (confirm == true) {
-                        // Delete owner document
-                        await FirebaseFirestore.instance
-                            .collection('users')
-                            .doc(ownerDoc.id)
-                            .delete();
-                        // Optionally delete related houses
-                        for (var house in houses) {
-                          await FirebaseFirestore.instance
-                              .collection('houses')
-                              .doc(house.id)
-                              .delete();
-                        }
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Owner "$ownerName" deleted')),
-                        );
-                        setState(() {});
-                      }
-                    },
+                      ),
+                      const SizedBox(height: 7),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEAF6EE),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          owner.phone.isEmpty
+                              ? 'Telephone non renseigne'
+                              : owner.phone,
+                          style: TextStyle(
+                            fontSize: isSmallScreen ? 13 : 14,
+                            color: const Color(0xFF2F7D4B),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'ID: ${owner.id}',
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFF6B7280)),
+                      ),
+                    ],
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              ownerName,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: isSmallScreen ? 18 : 22,
-                fontWeight: FontWeight.bold,
-                color: Colors.green,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              ownerPhone,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: isSmallScreen ? 14 : 18,
-                color: Colors.green,
-              ),
             ),
             const SizedBox(height: 12),
             Wrap(
-              alignment: WrapAlignment.center,
               spacing: 8,
               runSpacing: 8,
-              children: [
-                ...houses.map((house) {
-                  final houseData = house.data() as Map<String, dynamic>;
-                  final hasPending =
-                      houseData.containsKey('availabilityPending') &&
-                          (houseData['availabilityPending'] as List).isNotEmpty;
-                  return Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ActionChip(
+              children: owner.houses
+                  .map((house) => ActionChip(
+                        avatar: Icon(
+                          Icons.home_work_outlined,
+                          size: isSmallScreen ? 14 : 15,
+                          color: const Color(0xFF2F7D4B),
+                        ),
                         label: Text(
-                          house['name'],
+                          house.title,
                           style: TextStyle(
-                            color: Colors.green,
-                            fontSize: isSmallScreen ? 14 : 16,
+                            color: const Color(0xFF2F7D4B),
+                            fontSize: isSmallScreen ? 13 : 14,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                        backgroundColor: Colors.white,
+                        backgroundColor: const Color(0xFFF8FAFC),
                         shape: RoundedRectangleBorder(
-                          side: const BorderSide(color: Colors.green),
-                          borderRadius: BorderRadius.circular(20),
+                          side: const BorderSide(color: Color(0xFF9DD3B2)),
+                          borderRadius: BorderRadius.circular(999),
                         ),
-                        elevation: 4,
-                        shadowColor: Colors.black54,
-                        onPressed: () => _navigateToHouseDetails(house),
-                      ),
-                      if (hasPending)
-                        IconButton(
-                          icon: Icon(
-                            Icons.check_circle,
-                            color: Colors.green,
-                            size: isSmallScreen ? 18 : 20,
-                          ),
-                          tooltip: 'Confirm pending changes',
-                          onPressed: () async {
-                            final ref = FirebaseFirestore.instance
-                                .collection('houses')
-                                .doc(house.id);
-                            final pendingAvailability =
-                                houseData['availabilityPending']
-                                    as List<dynamic>;
-                            final pendingCleaning =
-                                houseData['cleaningSchedulePending']
-                                        as List<dynamic>? ??
-                                    [];
-                            await ref.update({
-                              'availability': pendingAvailability,
-                              'cleaningSchedule': pendingCleaning,
-                              'availabilityPending': [],
-                              'cleaningSchedulePending': [],
-                            });
-                            setState(() {});
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                    'Pending availability changes confirmed'),
-                              ),
-                            );
-                          },
-                        ),
-                    ],
-                  );
-                }).toList(),
-                ElevatedButton(
-                  onPressed: () => _navigateToAddHouse(ownerDoc),
-                  child: Text(
-                    'Add House',
-                    style: TextStyle(fontSize: isSmallScreen ? 14 : 16),
-                  ),
-                ),
-              ],
+                        elevation: 0,
+                        onPressed: () => _openApiHouseDetails(house),
+                      ))
+                  .toList(),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => _navigateToAddHouseOwner(owner),
+                icon: const Icon(Icons.add_home_work_outlined, size: 18),
+                label: const Text('Add House'),
+              ),
             ),
           ],
         ),
@@ -269,25 +496,803 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
+  Widget _buildApiOwnersTab() {
+    return FutureBuilder<List<_ApiOwner>>(
+      future: _apiOwnersFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Text(
+                'Erreur API: ${snapshot.error}',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+        final owners = snapshot.data ?? const <_ApiOwner>[];
+        if (owners.isEmpty) {
+          return const Center(
+              child:
+                  Text('Aucun proprietaire trouve dans la base du serveur.'));
+        }
+        return RefreshIndicator(
+          onRefresh: () async => _refreshAllApiTabs(),
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
+            itemCount: owners.length,
+            itemBuilder: (context, index) => _buildApiOwnerCard(owners[index]),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildApprovalsTab() {
+    return FutureBuilder<List<List<Map<String, dynamic>>>>(
+      future: Future.wait([
+        _approvalRequestsFuture ?? Future.value(const <Map<String, dynamic>>[]),
+        _approvalHistoryFuture ?? Future.value(const <Map<String, dynamic>>[]),
+      ]),
+      builder: (context, countsSnapshot) {
+        final pendingAll =
+            countsSnapshot.data != null && countsSnapshot.data!.isNotEmpty
+                ? countsSnapshot.data![0]
+                : const <Map<String, dynamic>>[];
+        final historyAll =
+            countsSnapshot.data != null && countsSnapshot.data!.length > 1
+                ? countsSnapshot.data![1]
+                : const <Map<String, dynamic>>[];
+        final pendingEffective = pendingAll.where((req) {
+          final id = (req['id'] ?? '').toString().trim();
+          return id.isEmpty || !_processedApprovalIds.contains(id);
+        }).toList();
+        final mergedHistory = <Map<String, dynamic>>[
+          ...historyAll,
+        ];
+        for (final entry in _localApprovalPayloads.entries) {
+          if (mergedHistory
+              .any((row) => (row['id'] ?? '').toString() == entry.key)) {
+            continue;
+          }
+          mergedHistory.insert(0, entry.value);
+        }
+        final pendingCount = pendingEffective.length;
+        final historyCount = mergedHistory.length;
+
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+              child: Row(
+                children: [
+                  ChoiceChip(
+                    label: Text('En attente ($pendingCount)'),
+                    selected: _approvalTabFilter == _ApprovalTabFilter.pending,
+                    onSelected: (_) => setState(() {
+                      _approvalTabFilter = _ApprovalTabFilter.pending;
+                    }),
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: Text('Traitees ($historyCount)'),
+                    selected: _approvalTabFilter == _ApprovalTabFilter.history,
+                    onSelected: (_) => setState(() {
+                      _approvalTabFilter = _ApprovalTabFilter.history;
+                    }),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: FutureBuilder<List<Map<String, dynamic>>>(
+                future: _approvalTabFilter == _ApprovalTabFilter.pending
+                    ? _approvalRequestsFuture
+                    : _approvalHistoryFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError) {
+                    return Center(
+                        child: Text('Erreur demandes: ${snapshot.error}'));
+                  }
+
+                  var requests =
+                      snapshot.data ?? const <Map<String, dynamic>>[];
+                  if (_approvalTabFilter == _ApprovalTabFilter.pending) {
+                    requests = requests.where((req) {
+                      final id = (req['id'] ?? '').toString().trim();
+                      return id.isEmpty || !_processedApprovalIds.contains(id);
+                    }).toList();
+                  } else {
+                    final nextHistory = <Map<String, dynamic>>[
+                      ...requests,
+                    ];
+                    for (final entry in _localApprovalPayloads.entries) {
+                      if (nextHistory.any(
+                          (row) => (row['id'] ?? '').toString() == entry.key)) {
+                        continue;
+                      }
+                      nextHistory.insert(0, entry.value);
+                    }
+                    requests = nextHistory;
+                  }
+
+                  if (requests.isEmpty) {
+                    return Center(
+                      child: Text(
+                        _approvalTabFilter == _ApprovalTabFilter.pending
+                            ? 'Aucune demande calendrier en attente.'
+                            : 'Aucune demande traitee.',
+                      ),
+                    );
+                  }
+
+                  return ListView.separated(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: requests.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final req = requests[index];
+                      final metadata = (req['metadata'] is Map)
+                          ? Map<String, dynamic>.from(req['metadata'] as Map)
+                          : <String, dynamic>{};
+
+                      final ownerId =
+                          (metadata['ownerId'] ?? req['clientUserId'] ?? '')
+                              .toString();
+                      final propertyTitle = (metadata['propertyTitle'] ??
+                              req['propertyTitle'] ??
+                              '')
+                          .toString();
+                      final startDate =
+                          (metadata['startDate'] ?? '').toString();
+                      final endDate = (metadata['endDate'] ?? '').toString();
+                      final note = (metadata['note'] ?? '').toString();
+                      final status = (metadata['status'] ?? 'pending')
+                          .toString()
+                          .toLowerCase();
+
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                propertyTitle.isEmpty
+                                    ? 'Demande calendrier'
+                                    : propertyTitle,
+                                style: const TextStyle(
+                                    fontSize: 18, fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 6),
+                              Text('Owner ID: $ownerId'),
+                              Text('Plage: $startDate -> $endDate'),
+                              if (note.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text('Note: $note'),
+                              ],
+                              if (_approvalTabFilter ==
+                                  _ApprovalTabFilter.history) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                    'Statut: ${status == 'approved' ? 'Approuvee' : 'Rejetee'}'),
+                              ],
+                              if (_approvalTabFilter ==
+                                  _ApprovalTabFilter.pending) ...[
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: ElevatedButton.icon(
+                                        onPressed: () =>
+                                            _approveCalendarRequest(req),
+                                        icon: const Icon(
+                                            Icons.check_circle_outline),
+                                        label: const Text('Approve'),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor:
+                                              const Color(0xFF2F7D4B),
+                                          foregroundColor: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        onPressed: () =>
+                                            _rejectCalendarRequest(req),
+                                        icon: const Icon(Icons.close),
+                                        label: const Text('Reject'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _formatDateTimeLabel(String value) {
+    final parsed = DateTime.tryParse(value);
+    if (parsed == null) return value;
+    final local = parsed.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(local.day)}/${two(local.month)} ${two(local.hour)}:${two(local.minute)}';
+  }
+
+  String _truncateLabel(String value, {int max = 42}) {
+    final clean = value.trim();
+    if (clean.length <= max) return clean;
+    return '${clean.substring(0, max - 1)}…';
+  }
+
+  String _notificationCategory(Map<String, dynamic> notif) {
+    final explicit = (notif['category'] ?? '').toString().toLowerCase();
+    if (explicit == 'owner' || explicit == 'client') return explicit;
+
+    final message = (notif['message'] ?? '').toString().toLowerCase();
+    if (message.contains('reservation') || message.contains('client')) {
+      return 'client';
+    }
+    return 'owner';
+  }
+
+  Widget _notificationCard(Map<String, dynamic> notif) {
+    final category = _notificationCategory(notif);
+    final message = (notif['message'] ?? '').toString();
+    final type = (notif['type'] ?? '').toString().toLowerCase();
+    final created =
+        _formatDateTimeLabel((notif['created_at'] ?? '').toString());
+
+    final icon = category == 'client'
+        ? Icons.event_available_outlined
+        : Icons.support_agent_outlined;
+    final badgeLabel =
+        category == 'client' ? 'Reservation client' : 'Proprietaire';
+    final badgeColor = category == 'client'
+        ? const Color(0xFF0EA5E9)
+        : const Color(0xFF2F7D4B);
+    final typeText = type.isEmpty ? 'info' : type;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: badgeColor),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message.isEmpty ? 'Notification' : message,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF111827),
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: badgeColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  badgeLabel,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: badgeColor,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                typeText.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF6B7280),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                created,
+                style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChatTab() {
+    return FutureBuilder<List<_ApiOwner>>(
+      future: _apiOwnersFuture,
+      builder: (context, ownersSnapshot) {
+        final owners = ownersSnapshot.data ?? const <_ApiOwner>[];
+        final hasSelectedOwner =
+            owners.any((owner) => owner.id == _selectedChatOwnerId);
+        final selectedOwnerId = hasSelectedOwner ? _selectedChatOwnerId : null;
+        final selectedOwner =
+            owners.where((o) => o.id == selectedOwnerId).firstOrNull;
+        final ownerHouses = selectedOwner?.houses ?? const <_ApiHouse>[];
+        final hasSelectedBien =
+            ownerHouses.any((house) => house.id == _selectedChatBienId);
+        final selectedBienId = hasSelectedBien ? _selectedChatBienId : null;
+        final selectedHouseTitle = ownerHouses
+            .where((house) => house.id == selectedBienId)
+            .map((house) => house.title)
+            .firstOrNull;
+
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedOwnerId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Owner',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: owners
+                        .map(
+                          (owner) => DropdownMenuItem<String>(
+                            value: owner.id,
+                            child: Text(
+                              _truncateLabel('${owner.name} (${owner.id})'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    selectedItemBuilder: (_) => owners
+                        .map(
+                          (owner) => Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              _truncateLabel('${owner.name} (${owner.id})'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedChatOwnerId = value;
+                        _selectedChatBienId = null;
+                        _selectedChatPropertyTitle = null;
+                      });
+                      _refreshChatThread();
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedBienId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Bien (optionnel)',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: ownerHouses
+                        .map(
+                          (house) => DropdownMenuItem<String>(
+                            value: house.id,
+                            child: Text(
+                              _truncateLabel(house.title),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    selectedItemBuilder: (_) => ownerHouses
+                        .map(
+                          (house) => Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              _truncateLabel(house.title),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedChatBienId = value;
+                        _selectedChatPropertyTitle = ownerHouses
+                            .where((house) => house.id == value)
+                            .map((house) => house.title)
+                            .firstOrNull;
+                      });
+                      _refreshChatThread();
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _chatMessageController,
+                          decoration: const InputDecoration(
+                            hintText: 'Ecrire un message...',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed:
+                            _sendingAdminMessage || selectedOwnerId == null
+                                ? null
+                                : _sendAdminMessage,
+                        child: _sendingAdminMessage
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.send),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (selectedOwnerId != null)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEAF6EE),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        selectedHouseTitle == null
+                            ? 'Discussion avec ${selectedOwner?.name ?? selectedOwnerId}'
+                            : 'Discussion ${selectedOwner?.name ?? selectedOwnerId} • ${_truncateLabel(selectedHouseTitle, max: 36)}',
+                        style: const TextStyle(
+                          color: Color(0xFF166534),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    )
+                  else
+                    const Text(
+                      'Selectionnez un owner pour ouvrir la discussion.',
+                      style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+                    ),
+                  const SizedBox(height: 8),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Chat enregistre et persistant (admin <-> proprietaire).',
+                      style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _chatMessagesFuture == null
+                  ? const Center(
+                      child: Text(
+                          'Selectionnez un proprietaire et un bien pour ouvrir la discussion.'),
+                    )
+                  : FutureBuilder<List<Map<String, dynamic>>>(
+                      future: _chatMessagesFuture,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                              child: CircularProgressIndicator());
+                        }
+                        if (snapshot.hasError) {
+                          return Center(
+                              child: Text('Erreur chat: ${snapshot.error}'));
+                        }
+
+                        final messages = (snapshot.data ??
+                                const <Map<String, dynamic>>[])
+                            .map((e) => Map<String, dynamic>.from(e))
+                            .toList()
+                          ..sort((a, b) => (a['createdAt'] ?? '')
+                              .toString()
+                              .compareTo((b['createdAt'] ?? '').toString()));
+                        if (messages.isEmpty) {
+                          return const Center(
+                              child: Text('Aucun message chat.'));
+                        }
+
+                        return ListView.builder(
+                          padding: const EdgeInsets.all(12),
+                          itemCount: messages.length,
+                          itemBuilder: (context, index) {
+                            final msg = messages[index];
+                            final kind = (msg['kind'] ?? '').toString();
+                            final text = (msg['text'] ?? '').toString();
+                            final dateTime = _formatDateTimeLabel(
+                                (msg['createdAt'] ?? '').toString());
+                            final fromAdmin = kind == 'admin_owner_chat';
+
+                            return Align(
+                              alignment: fromAdmin
+                                  ? Alignment.centerRight
+                                  : Alignment.centerLeft,
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding:
+                                    const EdgeInsets.fromLTRB(12, 9, 12, 9),
+                                constraints:
+                                    const BoxConstraints(maxWidth: 330),
+                                decoration: BoxDecoration(
+                                  color: fromAdmin
+                                      ? const Color(0xFFDCFCE7)
+                                      : const Color(0xFFF3F4F6),
+                                  border: Border.all(
+                                    color: fromAdmin
+                                        ? const Color(0xFF86EFAC)
+                                        : const Color(0xFFE5E7EB),
+                                  ),
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: const Radius.circular(14),
+                                    topRight: const Radius.circular(14),
+                                    bottomLeft:
+                                        Radius.circular(fromAdmin ? 14 : 4),
+                                    bottomRight:
+                                        Radius.circular(fromAdmin ? 4 : 14),
+                                  ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: fromAdmin
+                                      ? CrossAxisAlignment.end
+                                      : CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      text.isEmpty ? '(vide)' : text,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        color: Color(0xFF111827),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      dateTime,
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Color(0xFF6B7280)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildNotificationsTab() {
+    return FutureBuilder<List<List<Map<String, dynamic>>>>(
+      future: Future.wait([
+        _notificationsFuture ?? Future.value(const <Map<String, dynamic>>[]),
+        _communicationNotificationsFuture ??
+            Future.value(const <Map<String, dynamic>>[]),
+      ]),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Erreur notifications: ${snapshot.error}'));
+        }
+        final merged = <Map<String, dynamic>>[];
+        if (snapshot.data != null && snapshot.data!.isNotEmpty) {
+          merged.addAll(snapshot.data![0]);
+          merged.addAll(snapshot.data![1]);
+        }
+        merged.sort((a, b) => (b['created_at'] ?? '')
+            .toString()
+            .compareTo((a['created_at'] ?? '').toString()));
+
+        final ownerNotifications =
+            merged.where((n) => _notificationCategory(n) == 'owner').toList();
+        final clientNotifications =
+            merged.where((n) => _notificationCategory(n) == 'client').toList();
+        final notifications =
+            _notificationFilter == _AdminNotificationFilter.owner
+                ? ownerNotifications
+                : _notificationFilter == _AdminNotificationFilter.client
+                    ? clientNotifications
+                    : merged;
+        if (notifications.isEmpty) {
+          return const Center(
+              child: Text('Aucune notification pour ce filtre.'));
+        }
+
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: Text('Tous (${merged.length})'),
+                    selected:
+                        _notificationFilter == _AdminNotificationFilter.all,
+                    onSelected: (_) {
+                      setState(() =>
+                          _notificationFilter = _AdminNotificationFilter.all);
+                    },
+                  ),
+                  ChoiceChip(
+                    label: Text('Proprietaires (${ownerNotifications.length})'),
+                    selected:
+                        _notificationFilter == _AdminNotificationFilter.owner,
+                    onSelected: (_) {
+                      setState(() =>
+                          _notificationFilter = _AdminNotificationFilter.owner);
+                    },
+                  ),
+                  ChoiceChip(
+                    label: Text(
+                        'Reservations clients (${clientNotifications.length})'),
+                    selected:
+                        _notificationFilter == _AdminNotificationFilter.client,
+                    onSelected: (_) {
+                      setState(() => _notificationFilter =
+                          _AdminNotificationFilter.client);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.all(12),
+                itemCount: notifications.length,
+                itemBuilder: (context, index) {
+                  final notif = notifications[index];
+                  return _notificationCard(notif);
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (AppConfig.useDwiraApi) {
+      return DefaultTabController(
+        length: 4,
+        child: Scaffold(
+          backgroundColor: const Color(0xFFF4F6F8),
+          appBar: AppBar(
+            backgroundColor: const Color(0xFFF4F6F8),
+            elevation: 0,
+            titleSpacing: 16,
+            title: const Text(
+              'Dashboard Admin',
+              style: TextStyle(
+                color: Color(0xFF111827),
+                fontWeight: FontWeight.w700,
+                fontSize: 24,
+              ),
+            ),
+            actions: [
+              IconButton(
+                onPressed: _refreshAllApiTabs,
+                icon: const Icon(Icons.refresh, color: Color(0xFF2F7D4B)),
+              ),
+              IconButton(
+                onPressed: () => _logout(context),
+                icon: const Icon(Icons.logout, color: Color(0xFF111827)),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: ElevatedButton.icon(
+                  onPressed: _navigateToCreateOwner,
+                  icon: const Icon(Icons.person_add_alt_1, size: 18),
+                  label: const Text('New Owner'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2F7D4B),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            bottom: const TabBar(
+              tabs: [
+                Tab(icon: Icon(Icons.people_alt_outlined), text: 'Owners'),
+                Tab(
+                    icon: Icon(Icons.event_available_outlined),
+                    text: 'Approvals'),
+                Tab(icon: Icon(Icons.chat_bubble_outline), text: 'Chat'),
+                Tab(
+                    icon: Icon(Icons.notifications_none),
+                    text: 'Notifications'),
+              ],
+            ),
+          ),
+          body: TabBarView(
+            children: [
+              _buildApiOwnersTab(),
+              _buildApprovalsTab(),
+              _buildChatTab(),
+              _buildNotificationsTab(),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        title: const Text('House Owners (Admin)',
-            style: TextStyle(color: Colors.black)),
-        iconTheme: const IconThemeData(color: Colors.black),
-        actionsIconTheme: const IconThemeData(color: Colors.black),
+        title: const Text('Admin Dashboard (Firebase mode)'),
         actions: [
           IconButton(
             onPressed: () => _logout(context),
             icon: const Icon(Icons.logout),
           ),
-          TextButton.icon(
+          IconButton(
             onPressed: _navigateToCreateOwner,
-            icon: const Icon(Icons.person_add, color: Colors.green),
-            label:
-                const Text('New Owner', style: TextStyle(color: Colors.green)),
+            icon: const Icon(Icons.person_add_alt_1),
           ),
         ],
       ),
@@ -297,311 +1302,91 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          final data = snapshot.data ?? const <Map<String, dynamic>>[];
+          if (data.isEmpty) {
             return const Center(child: Text('No owners found.'));
           }
-
-          final ownersList = snapshot.data!;
-          final filteredOwnersList = (_selectedOwnerId != null)
-              ? ownersList.where((ownerData) {
-                  final ownerDoc = ownerData['owner'] as DocumentSnapshot;
-                  return ownerDoc.id == _selectedOwnerId;
-                }).toList()
-              : ownersList;
-
           return ListView.builder(
-            padding: const EdgeInsets.all(8),
-            itemCount: filteredOwnersList.length,
+            itemCount: data.length,
             itemBuilder: (context, index) {
-              final ownerData = filteredOwnersList[index];
-              return _buildOwnerCard(ownerData);
+              final ownerData = data[index];
+              final ownerDoc = ownerData['owner'] as DocumentSnapshot;
+              final houses = ownerData['houses'] as List<DocumentSnapshot>;
+              return Card(
+                margin: const EdgeInsets.all(10),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(ownerDoc['name']?.toString() ?? 'No Name'),
+                      Text(ownerDoc['phone']?.toString() ?? 'No Phone'),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: houses
+                            .map(
+                              (h) => ActionChip(
+                                label: Text(h['name']?.toString() ?? 'House'),
+                                onPressed: () async {
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          HouseDetailsScreen(house: h),
+                                    ),
+                                  );
+                                },
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ],
+                  ),
+                ),
+              );
             },
           );
         },
       ),
-      bottomNavigationBar: Container(
-        height: 80,
-        color: Colors.white,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            // Combined row: All Owners, Select House, Select State, Assign Button, Clear Button
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                // All Owners Dropdown
-                Expanded(
-                  flex: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        hint: const Text(
-                          'All Owners',
-                          style: TextStyle(color: Colors.green, fontSize: 10),
-                        ),
-                        value: _selectedOwnerId,
-                        items: _allOwnersDropdownItems(),
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedOwnerId = value;
-                            _selectedHouseFilter =
-                                null; // reset house filter when owner changes
-                            _selectedHouse =
-                                null; // reset selected house for assignment
-                          });
-                        },
-                        style:
-                            const TextStyle(color: Colors.green, fontSize: 10),
-                        iconEnabledColor: Colors.green,
-                        dropdownColor: Colors.white,
-                        isExpanded: true,
-                      ),
-                    ),
-                  ),
-                ),
-                // Select House Dropdown
-                Expanded(
-                  flex: 3,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<DocumentSnapshot>(
-                        hint: const Text(
-                          'Select House',
-                          style: TextStyle(color: Colors.green, fontSize: 10),
-                        ),
-                        value: _selectedHouse,
-                        items: _allHousesDropdownItems(),
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedHouse = value;
-                            _selectedState = null;
-                          });
-                        },
-                        style:
-                            const TextStyle(color: Colors.green, fontSize: 10),
-                        iconEnabledColor: Colors.green,
-                        dropdownColor: Colors.white,
-                        isExpanded: true,
-                      ),
-                    ),
-                  ),
-                ),
-                // Select State Dropdown
-                Expanded(
-                  flex: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        hint: const Text(
-                          'Select State',
-                          style: TextStyle(color: Colors.green, fontSize: 10),
-                        ),
-                        value: _selectedState,
-                        items: _houseStatesDropdownItems(),
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedState = value;
-                          });
-                        },
-                        style:
-                            const TextStyle(color: Colors.green, fontSize: 10),
-                        iconEnabledColor: Colors.green,
-                        dropdownColor: Colors.white,
-                        isExpanded: true,
-                      ),
-                    ),
-                  ),
-                ),
-                // Assign State Button
-                Expanded(
-                  flex: 1,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                    child: ElevatedButton(
-                      onPressed:
-                          (_selectedHouse != null && _selectedState != null)
-                              ? _assignStateToHouse
-                              : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        disabledBackgroundColor:
-                            const Color.fromARGB(255, 158, 158, 158),
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 2, vertical: 8),
-                        minimumSize: const Size(0, 30),
-                      ),
-                      child: const Text(
-                        'Assign',
-                        style: TextStyle(fontSize: 10),
-                      ),
-                    ),
-                  ),
-                ),
-                // Clear Filters Button
-                Expanded(
-                  flex: 1,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                    child: ElevatedButton(
-                      onPressed: () {
-                        setState(() {
-                          _selectedOwnerId = null;
-                          _selectedHouse = null;
-                          _selectedState = null;
-                        });
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 2, vertical: 8),
-                        minimumSize: const Size(0, 30),
-                      ),
-                      child: const Text(
-                        'Clear',
-                        style: TextStyle(fontSize: 10),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
     );
-  }
-
-  // New state variables for house state assignment
-  DocumentSnapshot? _selectedHouse;
-  String? _selectedState;
-
-  // New state variables for filtering
-  String? _selectedOwnerId;
-  DocumentSnapshot? _selectedHouseFilter;
-  String? _selectedStateFilter;
-
-  // Helper to get all houses for dropdown
-  List<DropdownMenuItem<DocumentSnapshot>> _allHousesDropdownItems() {
-    // Flatten houses only for the selected owner
-    final allHouses = <DocumentSnapshot>[];
-    if (_selectedOwnerId != null) {
-      for (var owner in _ownersWithHouses) {
-        final ownerDoc = owner['owner'] as DocumentSnapshot;
-        if (ownerDoc.id == _selectedOwnerId) {
-          allHouses.addAll(owner['houses'] as List<DocumentSnapshot>);
-          break;
-        }
-      }
-    } else {
-      // If no owner selected, show all houses
-      for (var owner in _ownersWithHouses) {
-        allHouses.addAll(owner['houses'] as List<DocumentSnapshot>);
-      }
-    }
-    return allHouses.map((house) {
-      return DropdownMenuItem(
-        value: house,
-        child: Text(house['name'] ?? 'Unnamed House',
-            style: const TextStyle(fontSize: 12)),
-      );
-    }).toList();
-  }
-
-  // Helper to get all owners for dropdown
-  List<DropdownMenuItem<String>> _allOwnersDropdownItems() {
-    final allOwners = <Map<String, dynamic>>[];
-    for (var owner in _ownersWithHouses) {
-      final ownerDoc = owner['owner'] as DocumentSnapshot;
-      final ownerData = ownerDoc.data() as Map<String, dynamic>;
-      final String ownerName = (ownerData['name'] is String)
-          ? ownerData['name'] as String
-          : 'Unnamed Owner';
-      allOwners.add({'id': ownerDoc.id, 'name': ownerName});
-    }
-    return allOwners.map((owner) {
-      return DropdownMenuItem<String>(
-        value: owner['id'] as String,
-        child:
-            Text(owner['name'] as String, style: const TextStyle(fontSize: 12)),
-      );
-    }).toList();
-  }
-
-  // Helper to get house states for dropdown
-  List<DropdownMenuItem<String>> _houseStatesDropdownItems() {
-    const states = [
-      'Cleaning Now',
-      'Done Cleaned',
-      'Plumber Assigned',
-      'Electrician Assigned',
-      'Food Delivery Assigned',
-    ];
-    return states.map((state) {
-      return DropdownMenuItem(
-        value: state,
-        child: Text(state, style: const TextStyle(fontSize: 12)),
-      );
-    }).toList();
-  }
-
-  // Store owners with houses for dropdown helper
-  List<Map<String, dynamic>> _ownersWithHouses = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _ownersWithHousesStream().listen((owners) {
-      setState(() {
-        _ownersWithHouses = owners;
-      });
-    });
-  }
-
-  // Assign selected state to selected house in Firestore
-  Future<void> _assignStateToHouse() async {
-    if (_selectedHouse == null || _selectedState == null) return;
-
-    final houseRef =
-        FirebaseFirestore.instance.collection('houses').doc(_selectedHouse!.id);
-
-    // Map state string to Firestore field updates
-    Map<String, dynamic> updateData = {};
-
-    switch (_selectedState) {
-      case 'Cleaning Now':
-        updateData['cleaningStatus'] = 'cleaning';
-        break;
-      case 'Done Cleaned':
-        updateData['cleaningStatus'] = 'done';
-        break;
-      case 'Plumber Assigned':
-        updateData['plumberStatus'] = 'assigned';
-        break;
-      case 'Electrician Assigned':
-        updateData['electricianStatus'] = 'assigned';
-        break;
-      case 'Food Delivery Assigned':
-        updateData['foodDeliveryStatus'] = 'assigned';
-        break;
-    }
-
-    await houseRef.update(updateData);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-          content: Text(
-              'State "${_selectedState!}" assigned to house "${_selectedHouse!['name']}"')),
-    );
-
-    setState(() {
-      _selectedHouse = null;
-      _selectedState = null;
-    });
   }
 }
+
+class _ApiOwner {
+  final String id;
+  final String name;
+  final String phone;
+  final List<_ApiHouse> houses;
+
+  const _ApiOwner({
+    required this.id,
+    required this.name,
+    required this.phone,
+    required this.houses,
+  });
+}
+
+class _ApiHouse {
+  final String id;
+  final String title;
+
+  const _ApiHouse({required this.id, required this.title});
+}
+
+class _ApiOwnerBuilder {
+  final String id;
+  final String name;
+  final String phone;
+  final List<_ApiHouse> houses = [];
+
+  _ApiOwnerBuilder({
+    required this.id,
+    required this.name,
+    required this.phone,
+  });
+}
+
+enum _AdminNotificationFilter { all, owner, client }
+
+enum _ApprovalTabFilter { pending, history }

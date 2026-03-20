@@ -32,15 +32,15 @@ class MyApp extends StatelessWidget {
       theme: ThemeData.light().copyWith(
         useMaterial3: true,
         textTheme: ThemeData.light().textTheme.apply(
-              bodyColor: Colors.green,
-              displayColor: Colors.green,
+              bodyColor: Colors.green[800]!,
+              displayColor: Colors.green[800]!,
               fontFamily: 'Cinzel',
             ),
         colorScheme: ColorScheme.light(
-          primary: Colors.green,
+          primary: Colors.green[800]!,
           onPrimary: Colors.white,
           background: Colors.white,
-          onBackground: Colors.green,
+          onBackground: Colors.green[800]!,
         ),
       ),
       home: const SplashScreen(),
@@ -97,9 +97,31 @@ class _SplashScreenState extends State<SplashScreen>
       body: Center(
         child: FadeTransition(
           opacity: _animation,
-          child: Image.asset(
-            'assets/images/logo.png',
-            height: 150,
+          child: Container(
+            width: 170,
+            height: 170,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF0F5132), Color(0xFF1F8A5B)],
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x40000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: ClipOval(
+              child: Image.asset(
+                'assets/images/logo.png',
+                fit: BoxFit.cover,
+              ),
+            ),
           ),
         ),
       ),

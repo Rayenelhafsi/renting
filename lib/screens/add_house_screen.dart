@@ -1,6 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../config/app_config.dart';
+import '../services/dwira_api_service.dart';
 
 class AddHouseScreen extends StatefulWidget {
   final String? ownerId;
@@ -20,13 +22,24 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
 
     setState(() => isLoading = true);
     try {
-      final ownerId = widget.ownerId ?? FirebaseAuth.instance.currentUser!.uid;
-      await FirebaseFirestore.instance.collection('houses').add({
-        'name': houseName,
-        'ownerId': ownerId,
-        'availability': [],
-        'cleaningSchedule': [],
-      });
+      final ownerId = widget.ownerId ?? FirebaseAuth.instance.currentUser?.uid;
+      if (ownerId == null || ownerId.trim().isEmpty) {
+        throw Exception('ownerId introuvable');
+      }
+
+      if (AppConfig.useDwiraApi) {
+        await DwiraApiService.instance.createBienAdmin(
+          titre: houseName,
+          proprietaireId: ownerId,
+        );
+      } else {
+        await FirebaseFirestore.instance.collection('houses').add({
+          'name': houseName,
+          'ownerId': ownerId,
+          'availability': [],
+          'cleaningSchedule': [],
+        });
+      }
 
       Navigator.pop(context);
     } catch (e) {
@@ -68,3 +81,4 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
     );
   }
 }
+

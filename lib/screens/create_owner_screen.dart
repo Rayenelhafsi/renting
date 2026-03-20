@@ -1,8 +1,9 @@
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+
+import '../config/app_config.dart';
+import '../services/dwira_api_service.dart';
 
 class CreateOwnerScreen extends StatefulWidget {
   const CreateOwnerScreen({super.key});
@@ -15,9 +16,20 @@ class _CreateOwnerScreenState extends State<CreateOwnerScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _cinController = TextEditingController();
 
   String? _newOwnerId;
   bool _isLoading = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    _emailController.dispose();
+    _cinController.dispose();
+    super.dispose();
+  }
 
   Future<void> _createOwner() async {
     if (!_formKey.currentState!.validate()) return;
@@ -28,19 +40,33 @@ class _CreateOwnerScreenState extends State<CreateOwnerScreen> {
     });
 
     try {
-      // Add owner details to Firestore with auto-generated ID
-      final docRef = await FirebaseFirestore.instance.collection('users').add({
-        'name': _nameController.text.trim(),
-        'phone': _phoneController.text.trim(),
-        'role': 'owner',
-      });
+      if (AppConfig.useDwiraApi) {
+        final created = await DwiraApiService.instance.createProprietaireAdmin(
+          nom: _nameController.text,
+          telephone: _phoneController.text,
+          email: _emailController.text,
+          cin: _cinController.text,
+        );
+        setState(() {
+          _newOwnerId = (created['id'] ?? '').toString();
+        });
+      } else {
+        final docRef = await FirebaseFirestore.instance.collection('users').add({
+          'name': _nameController.text.trim(),
+          'phone': _phoneController.text.trim(),
+          'email': _emailController.text.trim(),
+          'cin': _cinController.text.trim(),
+          'role': 'owner',
+        });
 
-      setState(() {
-        _newOwnerId = docRef.id;
-      });
+        setState(() {
+          _newOwnerId = docRef.id;
+        });
+      }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        SnackBar(content: Text('Erreur creation proprietaire: $e')),
       );
     } finally {
       setState(() {
@@ -50,16 +76,29 @@ class _CreateOwnerScreenState extends State<CreateOwnerScreen> {
   }
 
   Widget _buildQrCode() {
-    if (_newOwnerId == null) return const SizedBox.shrink();
+    if (_newOwnerId == null || _newOwnerId!.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return Column(
       children: [
         const SizedBox(height: 20),
-        const Text('Owner Created! QR Code:', style: TextStyle(fontSize: 16)),
+        Text(
+          'Proprietaire cree: $_newOwnerId',
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
         const SizedBox(height: 10),
-        QrImageView(
-          data: _newOwnerId!,
-          size: 200,
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+          ),
+          child: QrImageView(
+            data: _newOwnerId!,
+            size: 180,
+          ),
         ),
       ],
     );
@@ -81,17 +120,36 @@ class _CreateOwnerScreenState extends State<CreateOwnerScreen> {
                 children: [
                   TextFormField(
                     controller: _nameController,
-                    decoration: const InputDecoration(labelText: 'Name'),
-                    validator: (value) => value == null || value.isEmpty
-                        ? 'Please enter a name'
+                    decoration: const InputDecoration(labelText: 'Nom'),
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? 'Nom requis'
                         : null,
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _phoneController,
-                    decoration: const InputDecoration(labelText: 'Phone'),
-                    validator: (value) => value == null || value.isEmpty
-                        ? 'Please enter a phone number'
+                    decoration: const InputDecoration(labelText: 'Telephone'),
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? 'Telephone requis'
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _emailController,
+                    decoration: const InputDecoration(labelText: 'Email'),
+                    validator: (value) {
+                      final v = (value ?? '').trim();
+                      if (v.isEmpty) return 'Email requis';
+                      if (!v.contains('@')) return 'Email invalide';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _cinController,
+                    decoration: const InputDecoration(labelText: 'CIN'),
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? 'CIN requis'
                         : null,
                   ),
                   const SizedBox(height: 20),
@@ -111,3 +169,4 @@ class _CreateOwnerScreenState extends State<CreateOwnerScreen> {
     );
   }
 }
+
