@@ -72,13 +72,17 @@ class HousesRepository {
       throw Exception('Format API /api/biens invalide');
     }
 
-    final ownedBiens = decoded.whereType<Map>().where((bien) {
-      final proprietaireId = _asString(
-        bien['proprietaire_id'] ?? bien['ownerId'],
-        fallback: '',
-      );
-      return proprietaireId == ownerId;
-    }).map((bien) => Map<String, dynamic>.from(bien)).toList();
+    final ownedBiens = decoded
+        .whereType<Map>()
+        .where((bien) {
+          final proprietaireId = _asString(
+            bien['proprietaire_id'] ?? bien['ownerId'],
+            fallback: '',
+          );
+          return proprietaireId == ownerId;
+        })
+        .map((bien) => Map<String, dynamic>.from(bien))
+        .toList();
 
     final bienIds = ownedBiens
         .map((bien) => _asString(bien['id'], fallback: ''))
@@ -98,8 +102,10 @@ class HousesRepository {
           for (final raw in mediaDecoded.whereType<Map>()) {
             final media = Map<String, dynamic>.from(raw);
             final bienId = _asString(media['bien_id'], fallback: '');
-            final type = _asString(media['type'], fallback: 'image').toLowerCase();
-            final url = _resolveApiUrl(_asString(media['url'], fallback: ''), baseUrl);
+            final type =
+                _asString(media['type'], fallback: 'image').toLowerCase();
+            final url =
+                _resolveApiUrl(_asString(media['url'], fallback: ''), baseUrl);
             if (bienId.isEmpty || url.isEmpty) continue;
             if (type == 'video') continue;
             coverByBienId.putIfAbsent(bienId, () => url);
@@ -108,44 +114,48 @@ class HousesRepository {
       }
     }
 
-    return ownedBiens.map((map) {
-      final bienId = _asString(map['id'], fallback: '');
-      final coverUrl = coverByBienId[bienId] ??
-          _resolveApiUrl(
-            _asString(map['cover_media_url'] ?? map['cover_url'] ?? map['image_url'], fallback: ''),
-            baseUrl,
+    return ownedBiens
+        .map((map) {
+          final bienId = _asString(map['id'], fallback: '');
+          final coverUrl = coverByBienId[bienId] ??
+              _resolveApiUrl(
+                _asString(
+                    map['cover_media_url'] ??
+                        map['cover_url'] ??
+                        map['image_url'],
+                    fallback: ''),
+                baseUrl,
+              );
+          final photoBase64 = _asString(
+            map['photoBase64'] ?? map['photo_base64'] ?? map['image_base64'],
+            fallback: '',
           );
-      final photoBase64 = _asString(
-        map['photoBase64'] ?? map['photo_base64'] ?? map['image_base64'],
-        fallback: '',
-      );
-      final normalizedBase64 = photoBase64.isEmpty ? null : photoBase64;
+          final normalizedBase64 = photoBase64.isEmpty ? null : photoBase64;
 
-      return OwnerHouse(
-        id: bienId,
-        title: _asString(
-          map['titre'] ?? map['name'] ?? map['reference'],
-          fallback: 'Bien sans titre',
-        ),
-        photoBase64: normalizedBase64,
-        cleaningStatus: _asString(
-          map['cleaningStatus'] ?? map['menage_en_cours'],
-          fallback: 'pending',
-        ),
-        plumberStatus: _asString(map['plumberStatus'], fallback: 'none'),
-        electricianStatus:
-            _asString(map['electricianStatus'], fallback: 'none'),
-        foodDeliveryStatus:
-            _asString(map['foodDeliveryStatus'], fallback: 'none'),
-        hasPending: false,
-        isFeatured: _isTruthy(map['is_featured'] ?? map['isFeatured']),
-        source: 'dwira_api',
-        raw: {
-          ...map,
-          if (coverUrl.isNotEmpty) 'cover_media_url': coverUrl,
-        },
-      );
-    }).where((house) => house.id.isNotEmpty).toList();
+          return OwnerHouse(
+            id: bienId,
+            title: _resolveOwnerMobileTitle(map),
+            photoBase64: normalizedBase64,
+            cleaningStatus: _asString(
+              map['cleaningStatus'] ?? map['menage_en_cours'],
+              fallback: 'pending',
+            ),
+            plumberStatus: _asString(map['plumberStatus'], fallback: 'none'),
+            electricianStatus:
+                _asString(map['electricianStatus'], fallback: 'none'),
+            foodDeliveryStatus:
+                _asString(map['foodDeliveryStatus'], fallback: 'none'),
+            hasPending: false,
+            isFeatured: _isTruthy(map['is_featured'] ?? map['isFeatured']),
+            source: 'dwira_api',
+            raw: {
+              ...map,
+              if (coverUrl.isNotEmpty) 'cover_media_url': coverUrl,
+            },
+          );
+        })
+        .where((house) => house.id.isNotEmpty)
+        .toList();
   }
 
   String _asString(dynamic value, {required String fallback}) {
@@ -154,6 +164,47 @@ class HousesRepository {
       return fallback;
     }
     return normalized;
+  }
+
+  String _resolveOwnerMobileTitle(Map<String, dynamic> map) {
+    final direct = _asString(
+      map['nom_bien_mobile'] ??
+          map['owner_mobile_title'] ??
+          map['mobile_display_name'],
+      fallback: '',
+    );
+    if (direct.isNotEmpty) return direct;
+
+    final config = _safeParseJsonMap(map['location_saisonniere_config_json']);
+    final fromConfig = _asString(
+      config['nom_bien_mobile'] ??
+          config['owner_mobile_title'] ??
+          config['mobile_display_name'],
+      fallback: '',
+    );
+    if (fromConfig.isNotEmpty) return fromConfig;
+
+    return _asString(
+      map['titre'] ?? map['name'] ?? map['reference'],
+      fallback: 'Bien sans titre',
+    );
+  }
+
+  Map<String, dynamic> _safeParseJsonMap(dynamic raw) {
+    if (raw is Map) {
+      return Map<String, dynamic>.from(raw);
+    }
+    final text = (raw?.toString() ?? '').trim();
+    if (text.isEmpty) return const <String, dynamic>{};
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {
+      // Ignore malformed config and fallback to regular title.
+    }
+    return const <String, dynamic>{};
   }
 
   bool _isTruthy(dynamic value) {

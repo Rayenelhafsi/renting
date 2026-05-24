@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
@@ -6,6 +5,8 @@ import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
+
+import '../services/ui_language_service.dart';
 
 class HouseDetailsScreen extends StatefulWidget {
   final DocumentSnapshot house;
@@ -34,9 +35,6 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
 
   // Carousel related
   late PageController _pageController;
-  int _currentPage = 0;
-  Timer? _carouselTimer;
-
   @override
   void initState() {
     super.initState();
@@ -57,27 +55,11 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
 
     _pageController = PageController(initialPage: 0);
 
-    _startCarousel();
-
     _fetchUserRole();
-  }
-
-  void _startCarousel() {
-    _carouselTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
-      if (photos.isNotEmpty && _pageController.hasClients) {
-        _currentPage = (_currentPage + 1) % photos.length;
-        _pageController.animateToPage(
-          _currentPage,
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      }
-    });
   }
 
   @override
   void dispose() {
-    _carouselTimer?.cancel();
     _pageController.dispose();
     noteController.dispose();
     super.dispose();
@@ -88,8 +70,9 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
         .collection('houses')
         .doc(widget.house.id)
         .get();
-    final data = doc.data() as Map<String, dynamic>? ?? {};
+    final data = doc.data() ?? {};
     if (data.isNotEmpty) {
+      if (!mounted) return;
       setState(() {
         availableDates = _parseDates(data['availability'] ?? []);
         cleaningDates = _parseDates(data['cleaningSchedule'] ?? []);
@@ -160,10 +143,12 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
         FirebaseFirestore.instance.collection('houses').doc(widget.house.id);
     try {
       await ref.update({'note': noteController.text});
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Note saved successfully')),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to save note: $e')),
       );
@@ -184,11 +169,13 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
       photos.add(base64Image);
       await ref.update({'photosBase64': photos});
 
+      if (!mounted) return;
       setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Photo uploaded successfully')),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to upload photo: $e')),
       );
@@ -212,6 +199,7 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
           'availabilityPending': _updatedAvailability.toList(),
           'cleaningSchedulePending': _updatedCleaningSchedule.toList(),
         });
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
               content: Text('Availability changes submitted for approval')),
@@ -221,6 +209,7 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
           'availability': _updatedAvailability.toList(),
           'cleaningSchedule': _updatedCleaningSchedule.toList(),
         });
+        if (!mounted) return;
         setState(() {
           availableDates = _parseDates(_updatedAvailability.toList());
           cleaningDates = _parseDates(_updatedCleaningSchedule.toList());
@@ -236,6 +225,7 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
         );
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to submit availability changes: $e')),
       );
@@ -440,294 +430,303 @@ class _HouseDetailsScreenState extends State<HouseDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF3F0F6),
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildHeroSection(context),
-            Transform.translate(
-              offset: const Offset(0, -22),
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF8F8FA),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-                ),
-                padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 60,
-                        height: 5,
+    return ValueListenableBuilder<UiLanguage>(
+      valueListenable: UiLanguageService.current,
+      builder: (context, language, _) => Scaffold(
+        backgroundColor: const Color(0xFFF3F0F6),
+        body: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildHeroSection(context),
+              Transform.translate(
+                offset: const Offset(0, -22),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF8F8FA),
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(30)),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 60,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFD5D7DD),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 7,
+                        ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFD5D7DD),
+                          color: const Color(0xFFE6F6EE),
                           borderRadius: BorderRadius.circular(999),
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE6F6EE),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: const Text(
-                        'SEJOUR PREMIUM',
-                        style: TextStyle(
-                          color: Color(0xFF2F7D4B),
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.3,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      _houseName,
-                      style: const TextStyle(
-                        fontSize: 35,
-                        height: 1.05,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        _metaChip(icon: Icons.location_on_outlined, label: _locationLabel),
-                        _metaChip(
-                          icon: Icons.star_rounded,
-                          label: '4.7 (31 avis)',
-                          background: const Color(0xFFFDF2DF),
-                          foreground: const Color(0xFF9A6700),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () {},
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              foregroundColor: const Color(0xFF2F7D4B),
-                              elevation: 0,
-                              side: const BorderSide(
-                                color: Color(0xFFAEE2C8),
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                            ),
-                            child: const Text(
-                              'BOOK THE APARTMENT',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.2,
-                              ),
-                            ),
+                        child: const Text(
+                          'SEJOUR PREMIUM',
+                          style: TextStyle(
+                            color: Color(0xFF2F7D4B),
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.3,
+                            fontSize: 11,
                           ),
                         ),
-                        const SizedBox(width: 10),
-                        ElevatedButton(
-                          onPressed:
-                              (_isLoadingRole || _userRole == null) ? null : _confirmChanges,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2F7D4B),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
-                            ),
-                          ),
-                          child: _isLoadingRole
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.check),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(22),
-                        border: Border.all(color: const Color(0xFFE9ECF1)),
                       ),
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      const SizedBox(height: 12),
+                      Text(
+                        _houseName,
+                        style: const TextStyle(
+                          fontSize: 35,
+                          height: 1.05,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
                         children: [
-                          const Text(
-                            'NOTES',
-                            style: TextStyle(
-                              fontSize: 26,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF0F5132),
-                            ),
+                          _metaChip(
+                              icon: Icons.location_on_outlined,
+                              label: _locationLabel),
+                          _metaChip(
+                            icon: Icons.star_rounded,
+                            label: '4.7 (31 avis)',
+                            background: const Color(0xFFFDF2DF),
+                            foreground: const Color(0xFF9A6700),
                           ),
-                          const SizedBox(height: 10),
-                          TextField(
-                            controller: noteController,
-                            maxLines: 5,
-                            decoration: InputDecoration(
-                              hintText: 'Ecrivez vos notes ici',
-                              filled: true,
-                              fillColor: const Color(0xFFF8FAFC),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                borderSide: const BorderSide(
-                                  color: Color(0xFFD8E4DC),
-                                ),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                borderSide: const BorderSide(
-                                  color: Color(0xFFD8E4DC),
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                borderSide: const BorderSide(
-                                  color: Color(0xFF2F7D4B),
-                                  width: 1.5,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Align(
-                            alignment: Alignment.centerLeft,
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
                             child: ElevatedButton(
-                              onPressed: _saveNote,
+                              onPressed: () {},
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.white,
                                 foregroundColor: const Color(0xFF2F7D4B),
                                 elevation: 0,
-                                side: const BorderSide(color: Color(0xFFAEE2C8)),
+                                side: const BorderSide(
+                                  color: Color(0xFFAEE2C8),
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(999),
                                 ),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
                               ),
-                              child: const Text('SAVE NOTE'),
+                              child: const Text(
+                                'BOOK THE APARTMENT',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
                             ),
+                          ),
+                          const SizedBox(width: 10),
+                          ElevatedButton(
+                            onPressed: (_isLoadingRole || _userRole == null)
+                                ? null
+                                : _confirmChanges,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF2F7D4B),
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                            ),
+                            child: _isLoadingRole
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.check),
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(22),
-                        border: Border.all(color: const Color(0xFFE9ECF1)),
-                      ),
-                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                      child: TableCalendar(
-                        focusedDay: _focusedDay,
-                        firstDay: DateTime.utc(2024),
-                        lastDay: DateTime.utc(2030),
-                        calendarFormat: CalendarFormat.month,
-                        availableCalendarFormats: const {
-                          CalendarFormat.month: 'Month',
-                        },
-                        locale: 'en_US',
-                        headerStyle: const HeaderStyle(
-                          titleCentered: true,
-                          formatButtonVisible: false,
-                          titleTextStyle: TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.w500,
-                            color: Color(0xFF285D3A),
-                            letterSpacing: 0.4,
-                          ),
-                          leftChevronIcon: Icon(
-                            Icons.chevron_left,
-                            color: Color(0xFF111827),
-                            size: 28,
-                          ),
-                          rightChevronIcon: Icon(
-                            Icons.chevron_right,
-                            color: Color(0xFF111827),
-                            size: 28,
-                          ),
+                      const SizedBox(height: 18),
+                      Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(color: const Color(0xFFE9ECF1)),
                         ),
-                        daysOfWeekStyle: const DaysOfWeekStyle(
-                          weekdayStyle: TextStyle(
-                            color: Color(0xFF8E8E8E),
-                            fontWeight: FontWeight.w500,
-                          ),
-                          weekendStyle: TextStyle(
-                            color: Color(0xFF8E8E8E),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        calendarBuilders: CalendarBuilders(
-                          defaultBuilder: (context, day, focusedDay) =>
-                              _buildCalendarDay(day, focusedDay),
-                          todayBuilder: (context, day, focusedDay) =>
-                              _buildCalendarDay(day, focusedDay),
-                          outsideBuilder: (context, day, focusedDay) =>
-                              _buildCalendarDay(day, focusedDay),
-                        ),
-                        selectedDayPredicate: (day) =>
-                            _updatedAvailability.contains(
-                              DateFormat('yyyy-MM-dd').format(day),
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'NOTES',
+                              style: TextStyle(
+                                fontSize: 26,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF0F5132),
+                              ),
                             ),
-                        onDaySelected: (selectedDay, _) {
-                          setState(() {
-                            _toggleDate(_updatedAvailability, selectedDay);
-                          });
-                        },
-                        onPageChanged: (focusedDay) {
-                          setState(() {
-                            _focusedDay = focusedDay;
-                          });
-                        },
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: noteController,
+                              maxLines: 5,
+                              decoration: InputDecoration(
+                                hintText: 'Ecrivez vos notes ici',
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFFD8E4DC),
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFFD8E4DC),
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFF2F7D4B),
+                                    width: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: ElevatedButton(
+                                onPressed: _saveNote,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.white,
+                                  foregroundColor: const Color(0xFF2F7D4B),
+                                  elevation: 0,
+                                  side: const BorderSide(
+                                      color: Color(0xFFAEE2C8)),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                ),
+                                child: const Text('SAVE NOTE'),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 8,
-                      children: const [
-                        _CalendarLegend(
-                          color: Color(0xFF2F7D4B),
-                          label: 'Disponible',
+                      const SizedBox(height: 16),
+                      Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(color: const Color(0xFFE9ECF1)),
                         ),
-                        _CalendarLegend(
-                          color: Color(0xFFE77777),
-                          label: 'Reserve / indisponible',
+                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                        child: TableCalendar(
+                          focusedDay: _focusedDay,
+                          firstDay: DateTime.utc(2024),
+                          lastDay: DateTime.utc(2030),
+                          calendarFormat: CalendarFormat.month,
+                          availableCalendarFormats: const {
+                            CalendarFormat.month: 'Month',
+                          },
+                          locale: UiLanguageService.localeName(language),
+                          headerStyle: const HeaderStyle(
+                            titleCentered: true,
+                            formatButtonVisible: false,
+                            titleTextStyle: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w500,
+                              color: Color(0xFF285D3A),
+                              letterSpacing: 0.4,
+                            ),
+                            leftChevronIcon: Icon(
+                              Icons.chevron_left,
+                              color: Color(0xFF111827),
+                              size: 28,
+                            ),
+                            rightChevronIcon: Icon(
+                              Icons.chevron_right,
+                              color: Color(0xFF111827),
+                              size: 28,
+                            ),
+                          ),
+                          daysOfWeekStyle: const DaysOfWeekStyle(
+                            weekdayStyle: TextStyle(
+                              color: Color(0xFF8E8E8E),
+                              fontWeight: FontWeight.w500,
+                            ),
+                            weekendStyle: TextStyle(
+                              color: Color(0xFF8E8E8E),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          calendarBuilders: CalendarBuilders(
+                            defaultBuilder: (context, day, focusedDay) =>
+                                _buildCalendarDay(day, focusedDay),
+                            todayBuilder: (context, day, focusedDay) =>
+                                _buildCalendarDay(day, focusedDay),
+                            outsideBuilder: (context, day, focusedDay) =>
+                                _buildCalendarDay(day, focusedDay),
+                          ),
+                          selectedDayPredicate: (day) =>
+                              _updatedAvailability.contains(
+                            DateFormat('yyyy-MM-dd').format(day),
+                          ),
+                          onDaySelected: (selectedDay, _) {
+                            setState(() {
+                              _toggleDate(_updatedAvailability, selectedDay);
+                            });
+                          },
+                          onPageChanged: (focusedDay) {
+                            setState(() {
+                              _focusedDay = focusedDay;
+                            });
+                          },
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        children: const [
+                          _CalendarLegend(
+                            color: Color(0xFF2F7D4B),
+                            label: 'Disponible',
+                          ),
+                          _CalendarLegend(
+                            color: Color(0xFFE77777),
+                            label: 'Reserve / indisponible',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

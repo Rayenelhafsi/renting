@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:ui';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
@@ -9,15 +11,18 @@ import '../config/app_config.dart';
 import '../models/owner_house.dart';
 import '../services/dwira_api_service.dart';
 import '../services/ui_language_service.dart';
+import '../widgets/app_cached_image.dart';
 
 class ApiHouseDetailsScreen extends StatefulWidget {
   final OwnerHouse house;
   final String ownerId;
+  final bool closeOnSuccessfulSubmit;
 
   const ApiHouseDetailsScreen({
     super.key,
     required this.house,
     required this.ownerId,
+    this.closeOnSuccessfulSubmit = false,
   });
 
   @override
@@ -34,12 +39,16 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
 
   Set<String> _blockedDays = <String>{};
   _CalendarChangeMode _changeMode = _CalendarChangeMode.close;
+  List<_GalleryEntry> _galleryEntries = const <_GalleryEntry>[];
+  bool _galleryLoading = false;
+  int _selectedGalleryIndex = 0;
   String t(String key) => UiLanguageService.t(key);
 
   @override
   void initState() {
     super.initState();
     _loadCalendar();
+    _loadGallery();
   }
 
   @override
@@ -75,6 +84,44 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Chargement calendrier impossible: $e')),
       );
+    }
+  }
+
+  Future<void> _reloadDetails() async {
+    await Future.wait([
+      _loadCalendar(),
+      _loadGallery(),
+    ]);
+  }
+
+  Future<void> _loadGallery() async {
+    if (!mounted) return;
+    setState(() {
+      _galleryLoading = true;
+    });
+
+    final fallbackEntries = _buildFallbackGalleryEntries();
+    try {
+      final rows = await _api.fetchBienMedia(widget.house.id);
+      final entries = _buildGalleryEntries(rows, fallbackEntries);
+      if (!mounted) return;
+      setState(() {
+        _galleryEntries = entries;
+        _selectedGalleryIndex = 0;
+      });
+      await _precacheGallery(entries);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _galleryEntries = fallbackEntries;
+        _selectedGalleryIndex = 0;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _galleryLoading = false;
+        });
+      }
     }
   }
 
@@ -175,6 +222,10 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
           ),
         ),
       );
+      if (widget.closeOnSuccessfulSubmit) {
+        Navigator.of(context).pop(true);
+        return;
+      }
       setState(() {
         _start = null;
         _end = null;
@@ -257,7 +308,7 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
     return '';
   }
 
-  Widget _heroImage() {
+  List<_GalleryEntry> _buildFallbackGalleryEntries() {
     final base64Value = (widget.house.photoBase64 ?? '').trim();
     final coverUrl = _resolveCoverUrl();
 
@@ -267,25 +318,150 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
             ? base64Value.split(',').last
             : base64Value;
         final bytes = base64Decode(normalized);
-        return Image.memory(
-          bytes,
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-        );
+        return <_GalleryEntry>[_GalleryEntry.memory(bytes)];
       } catch (_) {
         // fallback below
       }
     }
 
     if (coverUrl.isNotEmpty) {
-      return Image.network(
-        coverUrl,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _heroPlaceholder(),
+      return <_GalleryEntry>[_GalleryEntry.network(coverUrl)];
+    }
+
+    return const <_GalleryEntry>[];
+  }
+
+  List<_GalleryEntry> _buildGalleryEntries(
+    List<Map<String, dynamic>> rows,
+    List<_GalleryEntry> fallbackEntries,
+  ) {
+    final seenUrls = <String>{};
+    final entries = <_GalleryEntry>[];
+
+    for (final row in rows) {
+      final type = (row['type'] ?? 'image').toString().trim().toLowerCase();
+      if (type == 'video') continue;
+      final url = _resolveMediaUrl((row['url'] ?? '').toString());
+      if (url.isEmpty || !seenUrls.add(url)) continue;
+      entries.add(_GalleryEntry.network(url));
+    }
+
+    if (entries.isEmpty) {
+      return fallbackEntries;
+    }
+
+    for (final fallback in fallbackEntries) {
+      if (fallback.url != null &&
+          fallback.url!.isNotEmpty &&
+          seenUrls.add(fallback.url!)) {
+        entries.insert(0, fallback);
+      } else if (fallback.memoryBytes != null) {
+        entries.insert(0, fallback);
+      }
+    }
+
+    return entries;
+  }
+
+  Future<void> _precacheGallery(List<_GalleryEntry> entries) async {
+    for (final entry in entries) {
+      if (!mounted) return;
+      if (entry.memoryBytes != null) continue;
+      final url = entry.url;
+      if (url == null || url.isEmpty) continue;
+      try {
+        await precacheImage(CachedNetworkImageProvider(url), context);
+      } catch (_) {
+        // Ignore cache warm-up failures, visible rendering handles fallback.
+      }
+    }
+  }
+
+  String _resolveMediaUrl(String rawUrl) {
+    final value = rawUrl.trim();
+    if (value.isEmpty) return '';
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return value;
+    }
+    if (value.startsWith('/')) {
+      final base = AppConfig.dwiraApiBaseUrl.replaceAll(RegExp(r'/+$'), '');
+      return '$base$value';
+    }
+    return value;
+  }
+
+  Widget _heroImage() {
+    if (_galleryLoading && _galleryEntries.isEmpty) {
+      return Container(
+        color: const Color(0xFFE6EDF2),
+        alignment: Alignment.center,
+        child: const CircularProgressIndicator(color: Color(0xFF2F7D4B)),
       );
     }
 
-    return _heroPlaceholder();
+    if (_galleryEntries.isEmpty) {
+      return _heroPlaceholder();
+    }
+
+    final safeIndex =
+        _selectedGalleryIndex.clamp(0, _galleryEntries.length - 1);
+    final entry = _galleryEntries[safeIndex];
+    return AppCachedImage(
+      imageUrl: entry.url ?? '',
+      memoryBytes: entry.memoryBytes,
+      fit: BoxFit.cover,
+      placeholder: _heroPlaceholder(),
+      errorWidget: _heroPlaceholder(),
+    );
+  }
+
+  Widget _galleryStrip() {
+    if (_galleryEntries.length <= 1) {
+      return const SizedBox.shrink();
+    }
+
+    return SizedBox(
+      height: 88,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _galleryEntries.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          final entry = _galleryEntries[index];
+          final selected = index == _selectedGalleryIndex;
+          return GestureDetector(
+            onTap: () {
+              setState(() {
+                _selectedGalleryIndex = index;
+              });
+            },
+            child: Container(
+              width: 104,
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: selected
+                      ? const Color(0xFF2F7D4B)
+                      : const Color(0xFFD7DEE8),
+                  width: selected ? 2 : 1,
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: AppCachedImage(
+                  imageUrl: entry.url ?? '',
+                  memoryBytes: entry.memoryBytes,
+                  fit: BoxFit.cover,
+                  placeholder: _heroPlaceholder(),
+                  errorWidget: _heroPlaceholder(),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Widget _heroPlaceholder() {
@@ -435,7 +611,7 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
         child: Scaffold(
           backgroundColor: const Color(0xFFF3F0F6),
           body: RefreshIndicator(
-            onRefresh: _loadCalendar,
+            onRefresh: _reloadDetails,
             child: ListView(
               children: [
                 SizedBox(
@@ -454,7 +630,7 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
                         ),
                       ),
                       Positioned(
-                        top: MediaQuery.of(context).padding.top + 10,
+                        top: MediaQuery.of(context).padding.top + 4,
                         left: 12,
                         child: _glassCircleButton(
                           icon: Icons.arrow_back,
@@ -462,17 +638,19 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
                         ),
                       ),
                       Positioned(
-                        top: MediaQuery.of(context).padding.top + 10,
+                        top: MediaQuery.of(context).padding.top + 4,
                         right: 12,
                         child: _glassCircleButton(
                           icon: Icons.refresh,
-                          onPressed: _loadCalendar,
+                          onPressed: () {
+                            _reloadDetails();
+                          },
                         ),
                       ),
                       Positioned(
                         left: 16,
                         right: 16,
-                        bottom: 16,
+                        bottom: 34,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -491,6 +669,15 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
                                   fontWeight: FontWeight.w800,
                                   letterSpacing: 1.0,
                                 ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '${_galleryEntries.length} photo${_galleryEntries.length > 1 ? 's' : ''}',
+                              style: const TextStyle(
+                                color: Color(0xFFE5E7EB),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                             const SizedBox(height: 8),
@@ -538,6 +725,8 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
                           ],
                         ),
                         const SizedBox(height: 14),
+                        _galleryStrip(),
+                        const SizedBox(height: 14),
                         _sectionCard(
                           title: t('owner_calendar'),
                           child: Column(
@@ -583,6 +772,7 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
                                 firstDay: DateTime.utc(2024, 1, 1),
                                 lastDay: DateTime.utc(2031, 12, 31),
                                 focusedDay: _focusedDay,
+                                locale: UiLanguageService.localeName(language),
                                 availableCalendarFormats: const {
                                   CalendarFormat.month: 'Month',
                                 },
@@ -711,6 +901,14 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
 }
 
 enum _CalendarChangeMode { close, open }
+
+class _GalleryEntry {
+  final String? url;
+  final Uint8List? memoryBytes;
+
+  const _GalleryEntry.network(String this.url) : memoryBytes = null;
+  const _GalleryEntry.memory(this.memoryBytes) : url = null;
+}
 
 class _LegendDot extends StatelessWidget {
   final Color color;

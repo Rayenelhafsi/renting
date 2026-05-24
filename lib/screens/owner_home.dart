@@ -2,17 +2,23 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../config/app_config.dart';
 import '../models/owner_house.dart';
 import '../services/dwira_api_service.dart';
 import '../services/houses_repository.dart';
+import '../services/push_notification_service.dart';
+import '../services/session_storage.dart';
 import '../services/ui_language_service.dart';
+import '../widgets/app_cached_image.dart';
 import 'api_house_details_screen.dart';
 import 'house_details.dart';
 import 'login_screen.dart';
@@ -30,20 +36,29 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
   final HousesRepository _housesRepository = const HousesRepository();
   final DwiraApiService _api = DwiraApiService.instance;
   final TextEditingController _chatController = TextEditingController();
+  final AudioPlayer _ringPlayer = AudioPlayer();
 
   Future<List<Map<String, dynamic>>>? _ownerChatFuture;
   Future<List<Map<String, dynamic>>>? _ownerNotificationsFuture;
   Future<List<OwnerHouse>>? _ownerHousesFuture;
   bool _sendingChat = false;
   Timer? _autoRefreshTimer;
+  StreamSubscription<String>? _tokenRefreshSubscription;
+  StreamSubscription<RemoteMessage>? _foregroundMessageSubscription;
   int _ownerUnreadNotifications = 0;
   int _pendingAvailabilityCount = 0;
   bool _showingAvailabilityDialog = false;
+  bool _showingCalendarPromptDialog = false;
+  bool _calendarPromptFlowInProgress = false;
+  String? _lastAvailabilityNotifiedDemandId;
+  bool _availabilityRinging = false;
+  bool _registeringPushToken = false;
 
   @override
   void initState() {
     super.initState();
-    _ownerHousesFuture = _getOwnerHouses();
+    WidgetsBinding.instance.addObserver(_lifecycleObserver);
+    _ownerHousesFuture = _loadOwnerHouses();
     _refreshComms();
     _initPushNotifications();
     _startAutoRefresh();
@@ -51,10 +66,24 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(_lifecycleObserver);
     _autoRefreshTimer?.cancel();
+    _tokenRefreshSubscription?.cancel();
+    _foregroundMessageSubscription?.cancel();
+    _stopAvailabilityRingtone();
+    PushNotificationService.instance.stopAvailabilityAlarm();
+    _ringPlayer.dispose();
     _chatController.dispose();
     super.dispose();
   }
+
+  late final WidgetsBindingObserver _lifecycleObserver =
+      _OwnerLifecycleObserver(
+    onResumed: () {
+      _refreshComms();
+      _initPushNotifications();
+    },
+  );
 
   String get _resolvedOwnerId => (widget.ownerId ?? '').trim();
   String t(String key) => UiLanguageService.t(key);
@@ -76,11 +105,43 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
     }).catchError((_) {});
 
     await _checkAvailabilityRequests();
+    await _checkPendingCalendarPrompt();
   }
 
   Future<List<OwnerHouse>> _getOwnerHouses() async {
     if (_resolvedOwnerId.isEmpty) return [];
     return _housesRepository.getOwnerHouses(_resolvedOwnerId);
+  }
+
+  Future<List<OwnerHouse>> _loadOwnerHouses() async {
+    final houses = await _getOwnerHouses();
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _warmHouseImageCache(houses);
+      });
+    }
+    return houses;
+  }
+
+  Future<void> _warmHouseImageCache(List<OwnerHouse> houses) async {
+    for (final house in houses) {
+      if (!mounted) return;
+      final rawUrl = (house.raw['cover_media_url'] ??
+              house.raw['cover_url'] ??
+              house.raw['image_url'] ??
+              house.raw['photo_url'] ??
+              '')
+          .toString()
+          .trim();
+      final mediaUrl = _resolveMediaUrl(rawUrl);
+      if (mediaUrl.isEmpty) continue;
+      try {
+        await precacheImage(CachedNetworkImageProvider(mediaUrl), context);
+      } catch (_) {
+        // Visible widget fallback handles failures.
+      }
+    }
   }
 
   void _startAutoRefresh() {
@@ -92,37 +153,52 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
   }
 
   Future<void> _initPushNotifications() async {
-    if (_resolvedOwnerId.isEmpty) return;
+    if (_resolvedOwnerId.isEmpty || _registeringPushToken) return;
+    setState(() {
+      _registeringPushToken = true;
+    });
     try {
-      final messaging = FirebaseMessaging.instance;
-      await messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
-      final token = await messaging.getToken();
-      if (token != null && token.trim().isNotEmpty) {
-        await _api.registerOwnerPushToken(
-          ownerId: _resolvedOwnerId,
-          token: token.trim(),
-          platform: kIsWeb ? 'web' : 'mobile',
-        );
+      final push = PushNotificationService.instance;
+      final permission = await push.requestPermission();
+      if (permission.authorizationStatus == AuthorizationStatus.denied) {
+        return;
       }
-      messaging.onTokenRefresh.listen((nextToken) {
+      final token = (await push.getToken())?.trim() ?? '';
+      if (token.isEmpty) {
+        return;
+      }
+      await _registerPushToken(token);
+      _tokenRefreshSubscription?.cancel();
+      _tokenRefreshSubscription = push.onTokenRefresh.listen((nextToken) {
         _api
             .registerOwnerPushToken(
               ownerId: _resolvedOwnerId,
               token: nextToken,
               platform: kIsWeb ? 'web' : 'mobile',
             )
+            .then((_) {})
             .catchError((_) {});
       });
-      FirebaseMessaging.onMessage.listen((_) {
+      _foregroundMessageSubscription?.cancel();
+      _foregroundMessageSubscription = push.onMessage.listen((_) {
         _refreshComms();
       });
     } catch (_) {
-      // FCM optional in local/debug environments
+    } finally {
+      if (mounted) {
+        setState(() {
+          _registeringPushToken = false;
+        });
+      }
     }
+  }
+
+  Future<void> _registerPushToken(String token) async {
+    await _api.registerOwnerPushToken(
+      ownerId: _resolvedOwnerId,
+      token: token,
+      platform: kIsWeb ? 'web' : 'mobile',
+    );
   }
 
   Future<void> _checkAvailabilityRequests() async {
@@ -134,6 +210,36 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
       setState(() {
         _pendingAvailabilityCount = requests.length;
       });
+      if (requests.isNotEmpty) {
+        await _startAvailabilityRingtone();
+        final firstRequest = Map<String, dynamic>.from(requests.first);
+        final demandId = (firstRequest['id'] ?? '').toString().trim();
+        if (demandId.isNotEmpty &&
+            demandId != _lastAvailabilityNotifiedDemandId) {
+          _lastAvailabilityNotifiedDemandId = demandId;
+          final title = 'Demande de disponibilite';
+          final propertyTitle = (firstRequest['bien_titre'] ??
+                  firstRequest['bien_reference'] ??
+                  'Bien')
+              .toString()
+              .trim();
+          final startDate =
+              (firstRequest['start_date'] ?? '').toString().trim();
+          final endDate = (firstRequest['end_date'] ?? '').toString().trim();
+          final body =
+              'Confirmez la disponibilite de $propertyTitle pour $startDate -> $endDate';
+          await PushNotificationService.instance
+              .showAvailabilityRequestNotification(
+            notificationId: demandId,
+            title: title,
+            body: body,
+          );
+        }
+      } else {
+        _lastAvailabilityNotifiedDemandId = null;
+        await _stopAvailabilityRingtone();
+        await PushNotificationService.instance.stopAvailabilityAlarm();
+      }
       if (requests.isNotEmpty && !_showingAvailabilityDialog) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted || _showingAvailabilityDialog) return;
@@ -145,7 +251,48 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
       setState(() {
         _pendingAvailabilityCount = 0;
       });
+      await _stopAvailabilityRingtone();
+      await PushNotificationService.instance.stopAvailabilityAlarm();
     }
+  }
+
+  Future<void> _checkPendingCalendarPrompt() async {
+    if (_resolvedOwnerId.isEmpty ||
+        _showingAvailabilityDialog ||
+        _showingCalendarPromptDialog ||
+        _calendarPromptFlowInProgress) {
+      return;
+    }
+    try {
+      final prompt =
+          await _api.fetchPendingOwnerCalendarPrompt(_resolvedOwnerId);
+      if (!mounted || prompt == null || _pendingAvailabilityCount > 0) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            _showingAvailabilityDialog ||
+            _showingCalendarPromptDialog ||
+            _calendarPromptFlowInProgress) {
+          return;
+        }
+        _showCalendarPromptDialog(prompt);
+      });
+    } catch (_) {
+      // Silent polling failure: notifications tab still shows server state.
+    }
+  }
+
+  Future<void> _startAvailabilityRingtone() async {
+    if (_availabilityRinging) return;
+    _availabilityRinging = true;
+    await _ringPlayer.setReleaseMode(ReleaseMode.loop);
+    await _ringPlayer.setVolume(1.0);
+    await _ringPlayer.play(AssetSource('audio/availability_request.wav'));
+  }
+
+  Future<void> _stopAvailabilityRingtone() async {
+    if (!_availabilityRinging) return;
+    _availabilityRinging = false;
+    await _ringPlayer.stop();
   }
 
   void _showAvailabilityDialog(Map<String, dynamic> request) {
@@ -183,10 +330,16 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
                           alignment: Alignment.center,
                           child: const Icon(Icons.home_work_outlined, size: 56),
                         )
-                      : Image.network(
-                          coverUrl,
+                      : AppCachedImage(
+                          imageUrl: coverUrl,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
+                          placeholder: Container(
+                            color: const Color(0xFFEAF6EE),
+                            alignment: Alignment.center,
+                            child:
+                                const Icon(Icons.home_work_outlined, size: 56),
+                          ),
+                          errorWidget: Container(
                             color: const Color(0xFFEAF6EE),
                             alignment: Alignment.center,
                             child:
@@ -216,6 +369,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
           OutlinedButton(
             onPressed: () async {
               try {
+                await _stopAvailabilityRingtone();
+                await PushNotificationService.instance.stopAvailabilityAlarm();
                 await _api.respondOwnerAvailabilityRequest(
                   ownerId: _resolvedOwnerId,
                   demandId: demandId,
@@ -242,6 +397,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
           ElevatedButton(
             onPressed: () async {
               try {
+                await _stopAvailabilityRingtone();
+                await PushNotificationService.instance.stopAvailabilityAlarm();
                 await _api.respondOwnerAvailabilityRequest(
                   ownerId: _resolvedOwnerId,
                   demandId: demandId,
@@ -271,7 +428,183 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
     });
   }
 
+  void _showCalendarPromptDialog(Map<String, dynamic> prompt) {
+    if (!mounted) return;
+    _showingCalendarPromptDialog = true;
+    final promptId = (prompt['id'] ?? '').toString().trim();
+    final promptDate = (prompt['promptDate'] ?? '').toString().trim();
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Mise a jour calendrier'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Vos calendriers sont a jour ?',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+              ),
+            ),
+            if (promptDate.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Relance du jour: $promptDate',
+                  style: const TextStyle(color: Color(0xFF6B7280)),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () async {
+              Navigator.of(this.context).pop();
+              _showingCalendarPromptDialog = false;
+              await _handleCalendarPromptNeedsUpdate(promptId);
+            },
+            child: const Text('Non'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                await _api.respondOwnerCalendarPrompt(
+                  ownerId: _resolvedOwnerId,
+                  promptId: promptId,
+                  responseKind: 'up_to_date',
+                );
+                if (!mounted) return;
+                Navigator.of(this.context).pop();
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Reponse envoyee: calendriers a jour'),
+                  ),
+                );
+                await _refreshComms();
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  SnackBar(content: Text('Erreur envoi reponse: $e')),
+                );
+              } finally {
+                _showingCalendarPromptDialog = false;
+              }
+            },
+            child: const Text('Oui'),
+          ),
+        ],
+      ),
+    ).then((_) {
+      _showingCalendarPromptDialog = false;
+    });
+  }
+
+  Future<void> _handleCalendarPromptNeedsUpdate(String promptId) async {
+    if (!mounted) return;
+    _calendarPromptFlowInProgress = true;
+    try {
+      final houses = await (_ownerHousesFuture ?? _getOwnerHouses());
+      if (!mounted) return;
+      if (houses.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Aucun bien disponible pour mise a jour.')),
+        );
+        return;
+      }
+
+      final selectedHouse = await showModalBottomSheet<OwnerHouse>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Selectionnez un bien',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Choisissez le bien dont le calendrier doit etre mis a jour.',
+                  style: TextStyle(color: Color(0xFF6B7280)),
+                ),
+                const SizedBox(height: 14),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: houses.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final house = houses[index];
+                      return ListTile(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: const BorderSide(color: Color(0xFFE5E7EB)),
+                        ),
+                        tileColor: Colors.white,
+                        title: Text(house.title),
+                        subtitle: Text('ID: ${house.id}'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).pop(house),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      if (!mounted || selectedHouse == null) return;
+
+      final submitted = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ApiHouseDetailsScreen(
+            house: selectedHouse,
+            ownerId: _resolvedOwnerId,
+            closeOnSuccessfulSubmit: true,
+          ),
+        ),
+      );
+
+      if (submitted == true) {
+        await _api.respondOwnerCalendarPrompt(
+          ownerId: _resolvedOwnerId,
+          promptId: promptId,
+          responseKind: 'update_requested',
+          bienId: selectedHouse.id,
+          propertyTitle: selectedHouse.title,
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Demande de mise a jour calendrier envoyee a l admin.'),
+          ),
+        );
+        await _refreshComms();
+      }
+    } finally {
+      _calendarPromptFlowInProgress = false;
+    }
+  }
+
   void _logout(BuildContext context) async {
+    await PushNotificationService.instance.stopAvailabilityAlarm();
+    await PersistedSession.clear();
     await FirebaseAuth.instance.signOut();
     if (!context.mounted) return;
     Navigator.pushAndRemoveUntil(
@@ -375,65 +708,105 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
     );
   }
 
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'cleaning':
-      case 'assigned':
-      case 'true':
-      case '1':
-        return Colors.green[500]!;
-      case 'done':
-        return Colors.green[800]!;
-      case 'pending':
-      case 'false':
-      case '0':
-        return Colors.orange[700]!;
-      default:
-        return Colors.blueGrey[600]!;
-    }
+  String _localeName() => UiLanguageService.localeName();
+
+  String _formatOwnerNotificationDate(DateTime date) {
+    return DateFormat('dd MMM yyyy', _localeName()).format(date);
   }
 
-  IconData _getStatusIcon(String status) {
-    switch (status.toLowerCase()) {
-      case 'cleaning':
-        return Icons.cleaning_services;
-      case 'assigned':
-        return Icons.assignment;
-      case 'done':
-        return Icons.check_circle;
-      case 'pending':
-        return Icons.pending;
-      default:
-        return Icons.help_outline;
+  List<DateTime> _extractNotificationDates(String rawMessage) {
+    final results = <DateTime>[];
+    final seen = <String>{};
+
+    for (final match
+        in RegExp(r'\b\d{4}-\d{2}-\d{2}\b').allMatches(rawMessage)) {
+      final parsed = DateTime.tryParse(match.group(0)!);
+      if (parsed == null) continue;
+      final key = DateFormat('yyyy-MM-dd').format(parsed);
+      if (seen.add(key)) {
+        results.add(DateTime(parsed.year, parsed.month, parsed.day));
+      }
     }
+
+    for (final match in RegExp(
+      r'(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{4}',
+    ).allMatches(rawMessage)) {
+      try {
+        final parsed =
+            DateFormat('EEE MMM d yyyy', 'en_US').parseLoose(match.group(0)!);
+        final key = DateFormat('yyyy-MM-dd').format(parsed);
+        if (seen.add(key)) {
+          results.add(DateTime(parsed.year, parsed.month, parsed.day));
+        }
+      } catch (_) {
+        // Ignore invalid legacy date fragments.
+      }
+    }
+
+    return results;
   }
 
-  Widget _buildStatusBadge(String title, String status) {
-    final bg = _getStatusColor(status).withValues(alpha: 0.14);
-    final fg = _getStatusColor(status).withValues(alpha: 0.95);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: fg.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(_getStatusIcon(status), size: 13, color: fg),
-          const SizedBox(width: 4),
-          Text(
-            '$title: $status',
-            style: TextStyle(
-              color: fg,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              fontFamily: 'Roboto',
-            ),
+  String _cleanOwnerNotificationTitle(String rawMessage) {
+    final lower = rawMessage.toLowerCase();
+    if (lower.contains('confirmez la disponibilite')) {
+      return 'Confirmation de disponibilite';
+    }
+    if (lower.contains('votre reponse a ete envoyee')) {
+      final status = lower.contains('indisponible')
+          ? 'bien indisponible'
+          : (lower.contains('disponible') ? 'bien disponible' : null);
+      return status == null ? 'Reponse envoyee' : 'Reponse envoyee: $status';
+    }
+
+    return rawMessage
+        .replaceAll(
+          RegExp(
+            r'(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{4}\s+\d{2}:\d{2}:\d{2}\s+GMT[+-]\d{4}\s+\(GMT[^\)]*\)',
           ),
-        ],
-      ),
+          '',
+        )
+        .replaceAll(RegExp(r'\b\d{4}-\d{2}-\d{2}\b'), '')
+        .replaceAll(
+          RegExp(r'\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\b'),
+          '',
+        )
+        .replaceAll(RegExp(r'Type:\s*[^|]+(\|)?', caseSensitive: false), '')
+        .replaceAll(RegExp(r'GMT[+-]\d{4}'), '')
+        .replaceAll(RegExp(r'\(GMT[^)]*\)'), '')
+        .replaceAll(RegExp(r'pour la periode', caseSensitive: false), '')
+        .replaceAll('->', ' ')
+        .replaceAll('\n', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim()
+        .replaceAll(RegExp(r'[:(,\-\s]+$'), '');
+  }
+
+  String? _buildOwnerNotificationDateLine(String rawMessage) {
+    final dates = _extractNotificationDates(rawMessage);
+    if (dates.isEmpty) return null;
+
+    final start = _formatOwnerNotificationDate(dates.first);
+    final end = _formatOwnerNotificationDate(
+      dates.length > 1 ? dates[1] : dates.first,
+    );
+    switch (UiLanguageService.current.value) {
+      case UiLanguage.en:
+        return 'From $start to $end';
+      case UiLanguage.ar:
+        return 'من $start إلى $end';
+      case UiLanguage.fr:
+        return 'Du $start au $end';
+    }
+  }
+
+  _OwnerNotificationViewData _describeOwnerNotification(
+    Map<String, dynamic> notification,
+  ) {
+    final rawMessage = (notification['message'] ?? '').toString().trim();
+    final title = _cleanOwnerNotificationTitle(rawMessage);
+    return _OwnerNotificationViewData(
+      title: title.isEmpty ? 'Notification' : title,
+      dateLine: _buildOwnerNotificationDateLine(rawMessage),
     );
   }
 
@@ -449,11 +822,18 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
     final mediaUrl = _resolveMediaUrl(rawUrl);
 
     if (mediaUrl.isNotEmpty) {
-      return Image.network(
-        mediaUrl,
+      return AppCachedImage(
+        imageUrl: mediaUrl,
         fit: BoxFit.cover,
         width: double.infinity,
-        errorBuilder: (_, __, ___) => Container(
+        placeholder: Container(
+          color: const Color(0xFFF0F5F1),
+          child: const Center(
+            child:
+                Icon(Icons.home_work_outlined, size: 70, color: Colors.green),
+          ),
+        ),
+        errorWidget: Container(
           color: const Color(0xFFF0F5F1),
           child: const Center(
             child:
@@ -521,6 +901,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
         }
 
         return ListView.builder(
+          key: const PageStorageKey<String>('owner-properties-list'),
+          cacheExtent: 1800,
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 22),
           itemCount: houses.length,
           itemBuilder: (context, index) {
@@ -607,7 +989,6 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
                                   style: const TextStyle(
                                     fontSize: 17,
                                     fontWeight: FontWeight.w800,
-                                    fontFamily: 'Roboto',
                                     color: Color(0xFF1F2937),
                                     height: 1.2,
                                   ),
@@ -628,7 +1009,6 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
                             '${t('id')}: ${house.id}',
                             style: TextStyle(
                               color: const Color(0xFF2F7D4B),
-                              fontFamily: 'Roboto',
                               fontWeight: FontWeight.w600,
                               fontSize: 15,
                             ),
@@ -646,7 +1026,6 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
                                   backgroundColor: const Color(0xFFEAF6EE),
                                   foregroundColor: const Color(0xFF2F7D4B),
                                   textStyle: const TextStyle(
-                                    fontFamily: 'Roboto',
                                     fontWeight: FontWeight.w700,
                                   ),
                                   shape: RoundedRectangleBorder(
@@ -654,21 +1033,6 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
                                   ),
                                 ),
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 11),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _buildStatusBadge(t('maintenance_cleaning'),
-                                  house.cleaningStatus),
-                              _buildStatusBadge(t('maintenance_plumber'),
-                                  house.plumberStatus),
-                              _buildStatusBadge(t('maintenance_electrician'),
-                                  house.electricianStatus),
-                              _buildStatusBadge(t('maintenance_delivery'),
-                                  house.foodDeliveryStatus),
                             ],
                           ),
                         ],
@@ -808,41 +1172,116 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
           return Center(child: Text('Erreur notifications: ${snapshot.error}'));
         }
         final items = snapshot.data ?? const <Map<String, dynamic>>[];
-        if (items.isEmpty) {
-          return Center(child: Text(t('owner_notifications_empty')));
-        }
         return RefreshIndicator(
-          onRefresh: _refreshComms,
+          onRefresh: () async {
+            await _refreshComms();
+          },
           child: ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            padding: const EdgeInsets.only(bottom: 16),
+            itemCount: items.isEmpty ? 1 : items.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 10),
             itemBuilder: (context, index) {
+              if (items.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+                  child: Center(child: Text(t('owner_notifications_empty'))),
+                );
+              }
               final n = items[index];
               final id = (n['id'] ?? '').toString();
               final isRead = n['lu'] == true;
-              return ListTile(
-                tileColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  side: const BorderSide(color: Color(0xFFE5E7EB)),
-                ),
-                title: Text((n['message'] ?? '').toString()),
-                subtitle: Text(
-                  'Type: ${(n['type'] ?? 'info').toString()} | ${(n['createdAt'] ?? '').toString()}',
-                ),
-                trailing: isRead
-                    ? const Icon(Icons.done_all, color: Color(0xFF2F7D4B))
-                    : TextButton(
-                        onPressed: () async {
-                          await _api.markOwnerNotificationRead(
-                            ownerId: _resolvedOwnerId,
-                            notificationId: id,
-                          );
-                          await _refreshComms();
-                        },
-                        child: Text(t('mark_read')),
+              final view = _describeOwnerNotification(n);
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x12000000),
+                        blurRadius: 12,
+                        offset: Offset(0, 6),
                       ),
+                    ],
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEAF6EE),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          isRead
+                              ? Icons.notifications_none_outlined
+                              : Icons.notifications_active_outlined,
+                          color: const Color(0xFF2F7D4B),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              view.title,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF14532D),
+                                height: 1.28,
+                              ),
+                            ),
+                            if ((view.dateLine ?? '').isNotEmpty) ...[
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 7,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  view.dateLine!,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF475569),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (!isRead) ...[
+                              const SizedBox(height: 12),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton(
+                                  onPressed: () async {
+                                    await _api.markOwnerNotificationRead(
+                                      ownerId: _resolvedOwnerId,
+                                      notificationId: id,
+                                    );
+                                    await _refreshComms();
+                                  },
+                                  child: Text(t('mark_read')),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               );
             },
           ),
@@ -941,4 +1380,27 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
       ),
     );
   }
+}
+
+class _OwnerLifecycleObserver with WidgetsBindingObserver {
+  _OwnerLifecycleObserver({required this.onResumed});
+
+  final VoidCallback onResumed;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      onResumed();
+    }
+  }
+}
+
+class _OwnerNotificationViewData {
+  final String title;
+  final String? dateLine;
+
+  const _OwnerNotificationViewData({
+    required this.title,
+    required this.dateLine,
+  });
 }

@@ -131,10 +131,8 @@ class UiLanguageService {
     'owner_calendar_help_open': {
       UiLanguage.fr:
           'Sélectionnez une période rouge à rouvrir (verte) puis soumettez.',
-      UiLanguage.en:
-          'Select a red period to reopen (green) and submit.',
-      UiLanguage.ar:
-          'اختر فترة حمراء لإعادة فتحها (أخضر) ثم أرسل الطلب.',
+      UiLanguage.en: 'Select a red period to reopen (green) and submit.',
+      UiLanguage.ar: 'اختر فترة حمراء لإعادة فتحها (أخضر) ثم أرسل الطلب.',
     },
     'owner_note': {
       UiLanguage.fr: 'Note pour admin',
@@ -196,5 +194,16 @@ class UiLanguageService {
 
   static TextDirection direction(UiLanguage language) {
     return language == UiLanguage.ar ? TextDirection.rtl : TextDirection.ltr;
+  }
+
+  static String localeName([UiLanguage? language]) {
+    switch (language ?? current.value) {
+      case UiLanguage.en:
+        return 'en_US';
+      case UiLanguage.ar:
+        return 'ar';
+      case UiLanguage.fr:
+        return 'fr_FR';
+    }
   }
 }

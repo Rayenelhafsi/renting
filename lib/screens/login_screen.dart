@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'barcode_scanner_screen.dart';
 import 'admin_home.dart';
@@ -6,6 +6,7 @@ import 'owner_home.dart';
 import '../config/app_config.dart';
 import '../services/houses_repository.dart';
 import '../services/dwira_api_service.dart';
+import '../services/session_storage.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -32,6 +33,7 @@ class _LoginScreenState extends State<LoginScreen> {
           email: email,
           password: password,
         );
+        await PersistedSession.saveAdmin(email: email, password: password);
         if (!context.mounted) return;
         Navigator.pushReplacement(
           context,
@@ -40,8 +42,8 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      UserCredential userCredential = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(
+      UserCredential userCredential =
+          await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
@@ -96,6 +98,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // Do NOT create a new Firestore user document for anonymous user
       // Instead, rely on existing ownerId document for role and authorization
       // Do NOT create or update Firestore document for owner on login
+      await PersistedSession.saveOwner(ownerId);
 
       // Navigate to owner home screen
       Navigator.pushReplacement(
@@ -137,6 +140,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // Do NOT create a new Firestore user document for anonymous user
       // Instead, rely on existing scannedCode document for role and authorization
       // Do NOT create or update Firestore document for owner on login
+      await PersistedSession.saveOwner(scannedCode);
 
       // Navigate to owner home screen
       Navigator.pushReplacement(
@@ -190,7 +194,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                 gradient: const LinearGradient(
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
-                                  colors: [Color(0xFF0F5132), Color(0xFF1F8A5B)],
+                                  colors: [
+                                    Color(0xFF0F5132),
+                                    Color(0xFF1F8A5B)
+                                  ],
                                 ),
                                 boxShadow: const [
                                   BoxShadow(
@@ -217,33 +224,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const SizedBox(height: 20),
                             TextField(
-                              controller: usernameController,
-                              decoration: const InputDecoration(
-                                labelText: 'Email admin',
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            TextField(
-                              controller: passwordController,
-                              obscureText: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Mot de passe',
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: login,
-                                child: const Text('Connexion Admin'),
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            const Divider(),
-                            const SizedBox(height: 14),
-                            TextField(
                               controller: ownerIdController,
                               decoration: const InputDecoration(
                                 labelText: 'ID proprietaire',
@@ -267,6 +247,33 @@ class _LoginScreenState extends State<LoginScreen> {
                                 label: const Text('Connexion QR Code'),
                               ),
                             ),
+                            const SizedBox(height: 14),
+                            const Divider(),
+                            const SizedBox(height: 14),
+                            TextField(
+                              controller: usernameController,
+                              decoration: const InputDecoration(
+                                labelText: 'Email admin',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: passwordController,
+                              obscureText: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Mot de passe',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: login,
+                                child: const Text('Connexion Admin'),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -278,4 +285,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-

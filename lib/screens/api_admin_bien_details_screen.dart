@@ -7,6 +7,7 @@ import 'dart:ui';
 
 import '../config/app_config.dart';
 import '../services/dwira_api_service.dart';
+import '../widgets/app_cached_image.dart';
 
 class ApiAdminBienDetailsScreen extends StatefulWidget {
   final String bienId;
@@ -416,10 +417,14 @@ class _ApiAdminBienDetailsScreenState extends State<ApiAdminBienDetailsScreen> {
                 fit: StackFit.expand,
                 children: [
                   if (coverUrl.isNotEmpty)
-                    Image.network(
-                      coverUrl,
+                    AppCachedImage(
+                      imageUrl: coverUrl,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
+                      placeholder: Container(
+                        color: const Color(0xFFE8ECF0),
+                        child: const Icon(Icons.broken_image, size: 56),
+                      ),
+                      errorWidget: Container(
                         color: const Color(0xFFE8ECF0),
                         child: const Icon(Icons.broken_image, size: 56),
                       ),

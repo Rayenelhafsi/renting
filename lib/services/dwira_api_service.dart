@@ -14,6 +14,8 @@ class DwiraApiService {
   final http.Client _client = createApiHttpClient();
   String? _sessionCookie;
   bool _adminAuthenticated = false;
+  String? _adminEmail;
+  String? _adminPassword;
 
   bool get isAdminAuthenticated => _adminAuthenticated;
 
@@ -29,11 +31,12 @@ class DwiraApiService {
 
   Future<void> loginAdmin(
       {required String email, required String password}) async {
+    final normalizedEmail = email.trim();
     final response = await _request(
       'POST',
       '/api/auth/admin/login',
       body: {
-        'email': email.trim(),
+        'email': normalizedEmail,
         'password': password,
       },
     );
@@ -43,6 +46,8 @@ class DwiraApiService {
     }
 
     _adminAuthenticated = true;
+    _adminEmail = normalizedEmail;
+    _adminPassword = password;
   }
 
   Future<void> logoutAdmin() async {
@@ -51,7 +56,20 @@ class DwiraApiService {
     } finally {
       _adminAuthenticated = false;
       _sessionCookie = null;
+      _adminEmail = null;
+      _adminPassword = null;
     }
+  }
+
+  void restoreAdminSession({
+    required String email,
+    required String password,
+  }) {
+    final normalizedEmail = email.trim();
+    if (normalizedEmail.isEmpty || password.isEmpty) return;
+    _adminAuthenticated = true;
+    _adminEmail = normalizedEmail;
+    _adminPassword = password;
   }
 
   Future<List<Map<String, dynamic>>> fetchBiens({String? ownerId}) async {
@@ -166,7 +184,9 @@ class DwiraApiService {
   Future<Map<String, dynamic>> createBienAdmin({
     required String titre,
     required String proprietaireId,
+    String? nomBienMobile,
   }) async {
+    final normalizedNomBienMobile = (nomBienMobile ?? '').trim();
     final response = await _request(
       'POST',
       '/api/biens',
@@ -189,6 +209,8 @@ class DwiraApiService {
         'is_featured': 0,
         'menage_en_cours': 0,
         'proprietaire_id': proprietaireId.trim(),
+        if (normalizedNomBienMobile.isNotEmpty)
+          'nom_bien_mobile': normalizedNomBienMobile,
       },
     );
 
@@ -478,6 +500,20 @@ class DwiraApiService {
         .toList();
   }
 
+  Future<void> markAdminNotificationRead(String notificationId) async {
+    final normalizedNotificationId = notificationId.trim();
+    if (normalizedNotificationId.isEmpty) return;
+    final response = await _request(
+      'PUT',
+      '/api/notifications/${Uri.encodeComponent(normalizedNotificationId)}/lu',
+      requiresAdmin: true,
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          _errorMessage(response, 'Mise a jour notification admin impossible'));
+    }
+  }
+
   Future<List<Map<String, dynamic>>>
       fetchCommunicationNotificationsAdmin() async {
     final interactions = await fetchClientInteractionsAdmin();
@@ -520,9 +556,10 @@ class DwiraApiService {
                   : 'Demande reservation client${propertyTitle.isNotEmpty ? ' - $propertyTitle' : ''}';
       return <String, dynamic>{
         'id': 'ci_${item['id']}',
-        'type': 'communication',
+        'type': type.isEmpty ? 'communication' : type,
         'message': message,
         'created_at': item['dateTime'],
+        'lu': metadata['lu'] == true || metadata['readByAdmin'] == true,
         'source': 'client_interactions',
         'category': category,
         'kind': kind,
@@ -536,6 +573,25 @@ class DwiraApiService {
         .toString()
         .compareTo((a['created_at'] ?? '').toString()));
     return comms;
+  }
+
+  Future<void> markClientInteractionNotificationRead(
+      String interactionId) async {
+    final normalizedInteractionId = interactionId.trim();
+    if (normalizedInteractionId.isEmpty) return;
+    final rawId = normalizedInteractionId.startsWith('ci_')
+        ? normalizedInteractionId.substring(3)
+        : normalizedInteractionId;
+    if (rawId.trim().isEmpty) return;
+    final response = await _request(
+      'PUT',
+      '/api/client-interactions/${Uri.encodeComponent(rawId)}/lu',
+      requiresAdmin: true,
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(_errorMessage(
+          response, 'Mise a jour notification interaction impossible'));
+    }
   }
 
   Future<List<Map<String, dynamic>>> fetchOwnerNotifications(
@@ -599,6 +655,83 @@ class DwiraApiService {
       throw Exception(_errorMessage(
           response, 'Enregistrement token notification impossible'));
     }
+  }
+
+  Future<void> registerAdminPushToken({
+    required String token,
+    String? platform,
+    String? appVersion,
+  }) async {
+    final normalizedToken = token.trim();
+    if (normalizedToken.isEmpty) return;
+    final response = await _request(
+      'POST',
+      '/api/mobile/admin/push-token',
+      requiresAdmin: true,
+      body: {
+        'token': normalizedToken,
+        if ((platform ?? '').trim().isNotEmpty) 'platform': platform!.trim(),
+        if ((appVersion ?? '').trim().isNotEmpty)
+          'appVersion': appVersion!.trim(),
+      },
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(_errorMessage(
+          response, 'Enregistrement token notification admin impossible'));
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchPendingOwnerCalendarPrompt(
+    String ownerId,
+  ) async {
+    final normalizedOwnerId = ownerId.trim();
+    if (normalizedOwnerId.isEmpty) return null;
+    final response = await _request(
+      'GET',
+      '/api/mobile/owners/${Uri.encodeComponent(normalizedOwnerId)}/calendar-prompts/pending',
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          _errorMessage(response, 'Chargement prompt calendrier impossible'));
+    }
+    final decoded = _decodeJson(response);
+    if (decoded == null) return null;
+    if (decoded is! Map) return null;
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<Map<String, dynamic>> respondOwnerCalendarPrompt({
+    required String ownerId,
+    required String promptId,
+    required String responseKind,
+    String? bienId,
+    String? propertyTitle,
+  }) async {
+    final normalizedOwnerId = ownerId.trim();
+    final normalizedPromptId = promptId.trim();
+    final normalizedResponse = responseKind.trim().toLowerCase();
+    if (normalizedOwnerId.isEmpty ||
+        normalizedPromptId.isEmpty ||
+        normalizedResponse.isEmpty) {
+      throw Exception('Reponse calendrier incomplete');
+    }
+    final response = await _request(
+      'POST',
+      '/api/mobile/owners/${Uri.encodeComponent(normalizedOwnerId)}/calendar-prompts/${Uri.encodeComponent(normalizedPromptId)}/respond',
+      body: {
+        'response': normalizedResponse,
+        if ((bienId ?? '').trim().isNotEmpty) 'bienId': bienId!.trim(),
+        if ((propertyTitle ?? '').trim().isNotEmpty)
+          'propertyTitle': propertyTitle!.trim(),
+      },
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          _errorMessage(response, 'Reponse prompt calendrier impossible'));
+    }
+    final decoded = _decodeJson(response);
+    if (decoded is! Map) return <String, dynamic>{};
+    return Map<String, dynamic>.from(decoded);
   }
 
   Future<List<Map<String, dynamic>>> fetchOwnerAvailabilityRequests(
@@ -731,6 +864,13 @@ class DwiraApiService {
       request.headers['Cookie'] = _sessionCookie!;
     }
 
+    if (requiresAdmin &&
+        (_adminEmail ?? '').isNotEmpty &&
+        (_adminPassword ?? '').isNotEmpty) {
+      request.headers['x-admin-email'] = _adminEmail!;
+      request.headers['x-admin-password'] = _adminPassword!;
+    }
+
     final streamed = await _client.send(request);
     final response = await http.Response.fromStream(streamed);
     _captureSessionCookie(response);
@@ -738,6 +878,7 @@ class DwiraApiService {
     if (requiresAdmin &&
         (response.statusCode == 401 || response.statusCode == 403)) {
       _adminAuthenticated = false;
+      _sessionCookie = null;
       throw Exception('Session admin expirée. Reconnectez-vous.');
     }
 

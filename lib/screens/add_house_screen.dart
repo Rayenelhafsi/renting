@@ -1,4 +1,4 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../config/app_config.dart';
@@ -14,6 +14,8 @@ class AddHouseScreen extends StatefulWidget {
 
 class _AddHouseScreenState extends State<AddHouseScreen> {
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _ownerMobileNameController =
+      TextEditingController();
   bool isLoading = false;
 
   Future<void> _addHouse() async {
@@ -31,6 +33,7 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
         await DwiraApiService.instance.createBienAdmin(
           titre: houseName,
           proprietaireId: ownerId,
+          nomBienMobile: _ownerMobileNameController.text.trim(),
         );
       } else {
         await FirebaseFirestore.instance.collection('houses').add({
@@ -41,14 +44,23 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
         });
       }
 
+      if (!mounted) return;
       Navigator.pop(context);
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: ${e.toString()}')),
       );
     } finally {
       setState(() => isLoading = false);
     }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _ownerMobileNameController.dispose();
+    super.dispose();
   }
 
   @override
@@ -69,6 +81,16 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
               ),
             ),
             const SizedBox(height: 20),
+            TextField(
+              controller: _ownerMobileNameController,
+              decoration: const InputDecoration(
+                labelText: 'Nom bien mobile proprietaire',
+                helperText:
+                    'Nom affiche uniquement dans l application mobile proprietaire.',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 20),
             isLoading
                 ? const CircularProgressIndicator()
                 : ElevatedButton(
@@ -81,4 +103,3 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
     );
   }
 }
-

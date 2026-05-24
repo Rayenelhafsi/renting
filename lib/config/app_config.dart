@@ -8,6 +8,7 @@ class AppConfig {
 
   static const String dwiraApiBaseUrl = String.fromEnvironment(
     'DWIRA_API_BASE_URL',
-    defaultValue: 'http://localhost:3001',
+    // Default now targets the site backend (not local DB server).
+    defaultValue: 'https://www.dwiraimmobilier.com',
   );
 }

@@ -2,11 +2,14 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../config/app_config.dart';
 import '../services/dwira_api_service.dart';
+import '../services/push_notification_service.dart';
+import '../services/session_storage.dart';
 import 'add_house_screen.dart';
 import 'api_admin_bien_details_screen.dart';
 import 'create_owner_screen.dart';
@@ -24,11 +27,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   final DwiraApiService _api = DwiraApiService.instance;
 
   Future<List<_ApiOwner>>? _apiOwnersFuture;
-  Future<List<Map<String, dynamic>>>? _approvalRequestsFuture;
-  Future<List<Map<String, dynamic>>>? _approvalHistoryFuture;
+  Future<List<List<Map<String, dynamic>>>>? _approvalDataFuture;
   Future<List<Map<String, dynamic>>>? _chatMessagesFuture;
-  Future<List<Map<String, dynamic>>>? _notificationsFuture;
-  Future<List<Map<String, dynamic>>>? _communicationNotificationsFuture;
+  Future<List<List<Map<String, dynamic>>>>? _notificationsDataFuture;
 
   final TextEditingController _chatMessageController = TextEditingController();
   bool _sendingAdminMessage = false;
@@ -40,7 +41,13 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   final Set<String> _processedApprovalIds = <String>{};
   final Map<String, Map<String, dynamic>> _localApprovalPayloads =
       <String, Map<String, dynamic>>{};
+  final Set<String> _seenAdminAlertIds = <String>{};
   Timer? _autoRefreshTimer;
+  StreamSubscription<String>? _adminTokenRefreshSubscription;
+  int _adminUnreadNotifications = 0;
+  bool _sessionRedirectScheduled = false;
+  bool _adminAlertBaselineLoaded = false;
+  bool _initializingAdminNotifications = false;
 
   Future<void> _openApiHouseDetails(_ApiHouse house) async {
     await Navigator.push(
@@ -87,6 +94,13 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   void initState() {
     super.initState();
     if (AppConfig.useDwiraApi) {
+      if (!_api.isAdminAuthenticated) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _redirectToLoginAfterSessionExpiry(showMessage: false);
+        });
+        return;
+      }
+      _initAdminNotifications();
       _refreshAllApiTabs();
       _startAutoRefresh();
     }
@@ -95,6 +109,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   @override
   void dispose() {
     _autoRefreshTimer?.cancel();
+    _adminTokenRefreshSubscription?.cancel();
     _chatMessageController.dispose();
     super.dispose();
   }
@@ -108,13 +123,19 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 
   void _refreshRealtimeData() {
+    final approvalRequestsFuture =
+        _api.fetchCalendarUpdateRequestsAdmin(statuses: {'pending'});
+    final approvalHistoryFuture = _api.fetchCalendarUpdateHistoryAdmin();
+    final notificationsFuture = _api.fetchNotificationsAdmin();
+    final communicationNotificationsFuture =
+        _api.fetchCommunicationNotificationsAdmin();
+
     setState(() {
-      _approvalRequestsFuture =
-          _api.fetchCalendarUpdateRequestsAdmin(statuses: {'pending'});
-      _approvalHistoryFuture = _api.fetchCalendarUpdateHistoryAdmin();
-      _notificationsFuture = _api.fetchNotificationsAdmin();
-      _communicationNotificationsFuture =
-          _api.fetchCommunicationNotificationsAdmin();
+      _approvalDataFuture =
+          Future.wait([approvalRequestsFuture, approvalHistoryFuture]);
+      _notificationsDataFuture = Future.wait(
+        [notificationsFuture, communicationNotificationsFuture],
+      );
       _apiOwnersFuture = _fetchApiOwnersWithHouses();
       if ((_selectedChatOwnerId ?? '').trim().isNotEmpty) {
         _chatMessagesFuture = _api.fetchOwnerChatMessages(
@@ -125,17 +146,27 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         );
       }
     });
+    _watchAdminNotificationFutures(
+      notificationsFuture,
+      communicationNotificationsFuture,
+    );
   }
 
   void _refreshAllApiTabs() {
+    final approvalRequestsFuture =
+        _api.fetchCalendarUpdateRequestsAdmin(statuses: {'pending'});
+    final approvalHistoryFuture = _api.fetchCalendarUpdateHistoryAdmin();
+    final notificationsFuture = _api.fetchNotificationsAdmin();
+    final communicationNotificationsFuture =
+        _api.fetchCommunicationNotificationsAdmin();
+
     setState(() {
       _apiOwnersFuture = _fetchApiOwnersWithHouses();
-      _approvalRequestsFuture =
-          _api.fetchCalendarUpdateRequestsAdmin(statuses: {'pending'});
-      _approvalHistoryFuture = _api.fetchCalendarUpdateHistoryAdmin();
-      _notificationsFuture = _api.fetchNotificationsAdmin();
-      _communicationNotificationsFuture =
-          _api.fetchCommunicationNotificationsAdmin();
+      _approvalDataFuture =
+          Future.wait([approvalRequestsFuture, approvalHistoryFuture]);
+      _notificationsDataFuture = Future.wait(
+        [notificationsFuture, communicationNotificationsFuture],
+      );
       if ((_selectedChatOwnerId ?? '').trim().isNotEmpty) {
         _chatMessagesFuture = _api.fetchOwnerChatMessages(
           _selectedChatOwnerId!.trim(),
@@ -145,6 +176,134 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         );
       }
     });
+    _watchAdminNotificationFutures(
+      notificationsFuture,
+      communicationNotificationsFuture,
+    );
+  }
+
+  Future<void> _initAdminNotifications() async {
+    if (_initializingAdminNotifications) return;
+    _initializingAdminNotifications = true;
+    try {
+      final push = PushNotificationService.instance;
+      final permission = await push.requestPermission();
+      if (permission.authorizationStatus.name == 'denied') {
+        return;
+      }
+      final token = (await push.getToken())?.trim() ?? '';
+      if (token.isNotEmpty) {
+        await _api.registerAdminPushToken(
+          token: token,
+          platform: kIsWeb ? 'web' : 'mobile',
+        );
+      }
+      _adminTokenRefreshSubscription?.cancel();
+      _adminTokenRefreshSubscription = push.onTokenRefresh.listen((nextToken) {
+        _api
+            .registerAdminPushToken(
+              token: nextToken,
+              platform: kIsWeb ? 'web' : 'mobile',
+            )
+            .catchError((_) {});
+      });
+    } catch (_) {
+      // Local polling still works even if permission request fails.
+    } finally {
+      _initializingAdminNotifications = false;
+    }
+  }
+
+  void _watchAdminNotificationFutures(
+    Future<List<Map<String, dynamic>>> notificationsFuture,
+    Future<List<Map<String, dynamic>>> communicationNotificationsFuture,
+  ) {
+    Future.wait([notificationsFuture, communicationNotificationsFuture]).then((
+      results,
+    ) {
+      if (!mounted) return;
+      final merged = <Map<String, dynamic>>[
+        ...results[0],
+        ...results[1],
+      ];
+      _maybeNotifyAdminEvents(merged);
+    }).catchError((_) {});
+  }
+
+  Future<void> _maybeNotifyAdminEvents(
+    List<Map<String, dynamic>> notifications,
+  ) async {
+    final unreadCount =
+        notifications.where((item) => item['lu'] != true).length;
+    if (mounted && _adminUnreadNotifications != unreadCount) {
+      setState(() {
+        _adminUnreadNotifications = unreadCount;
+      });
+    }
+
+    final candidates = notifications
+        .where(_isAdminAlertNotification)
+        .map((n) {
+          final map = Map<String, dynamic>.from(n);
+          final id = (map['id'] ?? '').toString().trim();
+          if (id.isNotEmpty) {
+            map['_alertId'] = id;
+          }
+          return map;
+        })
+        .where((n) => (n['_alertId'] ?? '').toString().isNotEmpty)
+        .toList()
+      ..sort((a, b) => (a['created_at'] ?? '')
+          .toString()
+          .compareTo((b['created_at'] ?? '').toString()));
+
+    if (!_adminAlertBaselineLoaded) {
+      _seenAdminAlertIds.addAll(
+        candidates.map((item) => (item['_alertId'] ?? '').toString()),
+      );
+      _adminAlertBaselineLoaded = true;
+      return;
+    }
+
+    final newItems = candidates.where((item) {
+      final id = (item['_alertId'] ?? '').toString();
+      return !_seenAdminAlertIds.contains(id);
+    }).toList();
+
+    if (newItems.isEmpty) return;
+
+    for (final item in newItems) {
+      final alertId = (item['_alertId'] ?? '').toString();
+      _seenAdminAlertIds.add(alertId);
+      final title = _adminAlertTitle(item);
+      final body = (item['message'] ?? '').toString().trim();
+      if (body.isEmpty) continue;
+      await PushNotificationService.instance.showAdminAlertNotification(
+        notificationId: alertId,
+        title: title,
+        body: body,
+      );
+    }
+  }
+
+  bool _isAdminAlertNotification(Map<String, dynamic> notif) {
+    final kind = (notif['kind'] ?? '').toString().toLowerCase();
+    final type = (notif['type'] ?? '').toString().toLowerCase();
+    return kind == 'calendar_update_request' ||
+        type == 'reservation_attempt' ||
+        type == 'reservation_submitted';
+  }
+
+  String _adminAlertTitle(Map<String, dynamic> notif) {
+    final kind = (notif['kind'] ?? '').toString().toLowerCase();
+    final type = (notif['type'] ?? '').toString().toLowerCase();
+    if (kind == 'calendar_update_request') {
+      return 'Mise a jour calendrier';
+    }
+    if (type == 'reservation_attempt' || type == 'reservation_submitted') {
+      return 'Nouvelle reservation';
+    }
+    return 'Alerte admin';
   }
 
   void _refreshChatThread() {
@@ -164,6 +323,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 
   void _logout(BuildContext context) async {
+    await PersistedSession.clear();
     if (AppConfig.useDwiraApi) {
       await _api.logoutAdmin();
     }
@@ -171,6 +331,31 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     if (!context.mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (context) => const LoginScreen()),
+      (route) => false,
+    );
+  }
+
+  bool _looksLikeSessionExpired(Object? error) {
+    final text = (error ?? '').toString().toLowerCase();
+    return text.contains('session admin expir') ||
+        text.contains('session expired') ||
+        text.contains('http 401') ||
+        text.contains('authentification requise');
+  }
+
+  void _redirectToLoginAfterSessionExpiry({bool showMessage = true}) {
+    if (!mounted || _sessionRedirectScheduled) return;
+    _sessionRedirectScheduled = true;
+    _autoRefreshTimer?.cancel();
+    if (showMessage) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Session admin expirée. Reconnectez-vous.'),
+        ),
+      );
+    }
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
       (route) => false,
     );
   }
@@ -216,8 +401,10 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       _chatMessageController.clear();
       _refreshChatThread();
       setState(() {
-        _communicationNotificationsFuture =
-            _api.fetchCommunicationNotificationsAdmin();
+        _notificationsDataFuture = Future.wait([
+          _api.fetchNotificationsAdmin(),
+          _api.fetchCommunicationNotificationsAdmin(),
+        ]);
       });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -249,7 +436,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           final next = Map<String, dynamic>.from(request);
           next['metadata'] = metadata;
           _localApprovalPayloads[interactionId] = next;
-          _approvalHistoryFuture = _api.fetchCalendarUpdateHistoryAdmin();
         });
       }
 
@@ -283,7 +469,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           final next = Map<String, dynamic>.from(request);
           next['metadata'] = metadata;
           _localApprovalPayloads[interactionId] = next;
-          _approvalHistoryFuture = _api.fetchCalendarUpdateHistoryAdmin();
         });
       }
       if (!mounted) return;
@@ -500,10 +685,16 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     return FutureBuilder<List<_ApiOwner>>(
       future: _apiOwnersFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
+          if (_looksLikeSessionExpired(snapshot.error)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _redirectToLoginAfterSessionExpiry();
+            });
+          }
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(20),
@@ -523,6 +714,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         return RefreshIndicator(
           onRefresh: () async => _refreshAllApiTabs(),
           child: ListView.builder(
+            key: const PageStorageKey<String>('admin-owners-list'),
             padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
             itemCount: owners.length,
             itemBuilder: (context, index) => _buildApiOwnerCard(owners[index]),
@@ -534,11 +726,21 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
   Widget _buildApprovalsTab() {
     return FutureBuilder<List<List<Map<String, dynamic>>>>(
-      future: Future.wait([
-        _approvalRequestsFuture ?? Future.value(const <Map<String, dynamic>>[]),
-        _approvalHistoryFuture ?? Future.value(const <Map<String, dynamic>>[]),
-      ]),
+      future: _approvalDataFuture,
       builder: (context, countsSnapshot) {
+        if (countsSnapshot.connectionState == ConnectionState.waiting &&
+            !countsSnapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (countsSnapshot.hasError) {
+          if (_looksLikeSessionExpired(countsSnapshot.error)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _redirectToLoginAfterSessionExpiry();
+            });
+          }
+          return Center(
+              child: Text('Erreur demandes: ${countsSnapshot.error}'));
+        }
         final pendingAll =
             countsSnapshot.data != null && countsSnapshot.data!.isNotEmpty
                 ? countsSnapshot.data![0]
@@ -589,38 +791,17 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               ),
             ),
             Expanded(
-              child: FutureBuilder<List<Map<String, dynamic>>>(
-                future: _approvalTabFilter == _ApprovalTabFilter.pending
-                    ? _approvalRequestsFuture
-                    : _approvalHistoryFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snapshot.hasError) {
-                    return Center(
-                        child: Text('Erreur demandes: ${snapshot.error}'));
-                  }
-
+              child: Builder(
+                builder: (context) {
                   var requests =
-                      snapshot.data ?? const <Map<String, dynamic>>[];
+                      _approvalTabFilter == _ApprovalTabFilter.pending
+                          ? pendingAll
+                          : mergedHistory;
                   if (_approvalTabFilter == _ApprovalTabFilter.pending) {
                     requests = requests.where((req) {
                       final id = (req['id'] ?? '').toString().trim();
                       return id.isEmpty || !_processedApprovalIds.contains(id);
                     }).toList();
-                  } else {
-                    final nextHistory = <Map<String, dynamic>>[
-                      ...requests,
-                    ];
-                    for (final entry in _localApprovalPayloads.entries) {
-                      if (nextHistory.any(
-                          (row) => (row['id'] ?? '').toString() == entry.key)) {
-                        continue;
-                      }
-                      nextHistory.insert(0, entry.value);
-                    }
-                    requests = nextHistory;
                   }
 
                   if (requests.isEmpty) {
@@ -634,6 +815,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                   }
 
                   return ListView.separated(
+                    key: const PageStorageKey<String>('admin-approvals-list'),
                     padding: const EdgeInsets.all(12),
                     itemCount: requests.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -731,8 +913,15 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 
   String _formatDateTimeLabel(String value) {
-    final parsed = DateTime.tryParse(value);
-    if (parsed == null) return value;
+    final clean = value.trim();
+    final localMatch = RegExp(
+      r'^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$',
+    ).firstMatch(clean);
+    if (localMatch != null) {
+      return '${localMatch.group(3)}/${localMatch.group(2)} ${localMatch.group(4)}:${localMatch.group(5)}';
+    }
+    final parsed = DateTime.tryParse(clean);
+    if (parsed == null) return clean;
     final local = parsed.toLocal();
     String two(int n) => n.toString().padLeft(2, '0');
     return '${two(local.day)}/${two(local.month)} ${two(local.hour)}:${two(local.minute)}';
@@ -759,6 +948,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     final category = _notificationCategory(notif);
     final message = (notif['message'] ?? '').toString();
     final type = (notif['type'] ?? '').toString().toLowerCase();
+    final isRead = notif['lu'] == true;
     final created =
         _formatDateTimeLabel((notif['created_at'] ?? '').toString());
 
@@ -776,8 +966,11 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        color: isRead ? Colors.white : const Color(0xFFF8FAFF),
+        border: Border.all(
+          color: isRead ? const Color(0xFFE5E7EB) : badgeColor,
+          width: isRead ? 1 : 1.4,
+        ),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
@@ -835,8 +1028,74 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               ),
             ],
           ),
+          if (!isRead) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => _markAdminNotificationRead(notif),
+                icon: const Icon(Icons.done, size: 16),
+                label: const Text('Marquer lu'),
+              ),
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  Future<void> _markAdminNotificationRead(Map<String, dynamic> notif) async {
+    final id = (notif['id'] ?? '').toString().trim();
+    if (id.isEmpty) return;
+    try {
+      if ((notif['source'] ?? '').toString() == 'client_interactions') {
+        await _api.markClientInteractionNotificationRead(id);
+      } else {
+        await _api.markAdminNotificationRead(id);
+      }
+      _refreshAllApiTabs();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Echec mise a jour notification: $error')),
+      );
+    }
+  }
+
+  Widget _buildNotificationBellIcon() {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Icon(
+          Icons.notifications_none,
+          color: _adminUnreadNotifications > 0
+              ? const Color(0xFFDC2626)
+              : const Color(0xFF2F7D4B),
+        ),
+        if (_adminUnreadNotifications > 0)
+          Positioned(
+            right: -8,
+            top: -6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: const BoxDecoration(
+                color: Color(0xFFDC2626),
+                shape: BoxShape.rectangle,
+                borderRadius: BorderRadius.all(Radius.circular(999)),
+              ),
+              child: Text(
+                _adminUnreadNotifications > 99
+                    ? '99+'
+                    : '$_adminUnreadNotifications',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -1025,11 +1284,17 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                       future: _chatMessagesFuture,
                       builder: (context, snapshot) {
                         if (snapshot.connectionState ==
-                            ConnectionState.waiting) {
+                                ConnectionState.waiting &&
+                            !snapshot.hasData) {
                           return const Center(
                               child: CircularProgressIndicator());
                         }
                         if (snapshot.hasError) {
+                          if (_looksLikeSessionExpired(snapshot.error)) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              _redirectToLoginAfterSessionExpiry();
+                            });
+                          }
                           return Center(
                               child: Text('Erreur chat: ${snapshot.error}'));
                         }
@@ -1047,6 +1312,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                         }
 
                         return ListView.builder(
+                          key: const PageStorageKey<String>('admin-chat-list'),
                           padding: const EdgeInsets.all(12),
                           itemCount: messages.length,
                           itemBuilder: (context, index) {
@@ -1121,16 +1387,18 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
   Widget _buildNotificationsTab() {
     return FutureBuilder<List<List<Map<String, dynamic>>>>(
-      future: Future.wait([
-        _notificationsFuture ?? Future.value(const <Map<String, dynamic>>[]),
-        _communicationNotificationsFuture ??
-            Future.value(const <Map<String, dynamic>>[]),
-      ]),
+      future: _notificationsDataFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
+          if (_looksLikeSessionExpired(snapshot.error)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _redirectToLoginAfterSessionExpiry();
+            });
+          }
           return Center(child: Text('Erreur notifications: ${snapshot.error}'));
         }
         final merged = <Map<String, dynamic>>[];
@@ -1198,6 +1466,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             ),
             Expanded(
               child: ListView.builder(
+                key: const PageStorageKey<String>('admin-notifications-list'),
                 padding: const EdgeInsets.all(12),
                 itemCount: notifications.length,
                 itemBuilder: (context, index) {
@@ -1257,16 +1526,15 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 ),
               ),
             ],
-            bottom: const TabBar(
+            bottom: TabBar(
               tabs: [
-                Tab(icon: Icon(Icons.people_alt_outlined), text: 'Owners'),
+                const Tab(
+                    icon: Icon(Icons.people_alt_outlined), text: 'Owners'),
                 Tab(
                     icon: Icon(Icons.event_available_outlined),
                     text: 'Approvals'),
-                Tab(icon: Icon(Icons.chat_bubble_outline), text: 'Chat'),
-                Tab(
-                    icon: Icon(Icons.notifications_none),
-                    text: 'Notifications'),
+                const Tab(icon: Icon(Icons.chat_bubble_outline), text: 'Chat'),
+                Tab(icon: _buildNotificationBellIcon(), text: 'Notifications'),
               ],
             ),
           ),

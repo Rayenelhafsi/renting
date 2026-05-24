@@ -1,22 +1,31 @@
-import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
-// Écrans
+import 'config/app_config.dart';
+import 'firebase_options.dart' as firebase_options;
+import 'screens/admin_home.dart';
 import 'screens/login_screen.dart';
 import 'screens/owner_home.dart';
-import 'screens/admin_home.dart';
-
-// Fichier de config Firebase (à générer avec `flutterfire configure`)
-import 'firebase_options.dart' as firebase_options;
+import 'services/dwira_api_service.dart';
+import 'services/push_notification_service.dart';
+import 'services/session_storage.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  PaintingBinding.instance.imageCache.maximumSize = 1000;
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 300 << 20;
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
+  await initializeDateFormatting();
   await Firebase.initializeApp(
     options: firebase_options.DefaultFirebaseOptions.currentPlatform,
   );
+  await PushNotificationService.instance.initialize();
 
   runApp(const MyApp());
 }
@@ -29,18 +38,20 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Proprietaires Dwira',
-      theme: ThemeData.light().copyWith(
+      theme: ThemeData(
+        brightness: Brightness.light,
         useMaterial3: true,
-        textTheme: ThemeData.light().textTheme.apply(
-              bodyColor: Colors.green[800]!,
-              displayColor: Colors.green[800]!,
-              fontFamily: 'Cinzel',
-            ),
+        textTheme: GoogleFonts.plusJakartaSansTextTheme(
+          ThemeData.light().textTheme,
+        ).apply(
+          bodyColor: Colors.green[800]!,
+          displayColor: Colors.green[800]!,
+        ),
         colorScheme: ColorScheme.light(
           primary: Colors.green[800]!,
           onPrimary: Colors.white,
-          background: Colors.white,
-          onBackground: Colors.green[800]!,
+          surface: Colors.white,
+          onSurface: Colors.green[800]!,
         ),
       ),
       home: const SplashScreen(),
@@ -59,7 +70,6 @@ class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
-  bool _visible = true;
 
   @override
   void initState() {
@@ -141,10 +151,13 @@ class _RootState extends State<Root> {
   DocumentSnapshot? _userDoc;
   late final Stream<User?> _authStateChanges;
   Stream<DocumentSnapshot>? _userDocStream;
+  PersistedSession? _persistedSession;
+  bool _sessionLoaded = false;
 
   @override
   void initState() {
     super.initState();
+    _loadPersistedSession();
     _authStateChanges = FirebaseAuth.instance.authStateChanges();
     _authStateChanges.listen((user) {
       setState(() {
@@ -167,8 +180,45 @@ class _RootState extends State<Root> {
     });
   }
 
+  Future<void> _loadPersistedSession() async {
+    final persistedSession = await PersistedSession.load();
+    if (persistedSession?.isAdmin == true) {
+      DwiraApiService.instance.restoreAdminSession(
+        email: persistedSession!.adminEmail!,
+        password: persistedSession.adminPassword!,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _persistedSession = persistedSession;
+      _sessionLoaded = true;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (!_sessionLoaded) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (AppConfig.useDwiraApi) {
+      if (_persistedSession?.isAdmin == true &&
+          DwiraApiService.instance.isAdminAuthenticated) {
+        return const AdminHomeScreen();
+      }
+
+      if (_persistedSession?.isOwner == true) {
+        final ownerId = (_persistedSession?.ownerId ?? '').trim();
+        if (ownerId.isNotEmpty) {
+          return OwnerHomeScreen(ownerId: ownerId);
+        }
+      }
+
+      return const LoginScreen();
+    }
+
     if (_user == null) {
       return const LoginScreen();
     }
