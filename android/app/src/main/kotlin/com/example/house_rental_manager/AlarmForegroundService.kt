@@ -11,11 +11,13 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 
 class AlarmForegroundService : Service() {
     private var mediaPlayer: MediaPlayer? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -40,13 +42,20 @@ class AlarmForegroundService : Service() {
                 demandId = demandId,
             ),
         )
+        acquireWakeLock()
         startAlarm()
-        return START_REDELIVER_INTENT
+        return START_STICKY
     }
 
     override fun onDestroy() {
         stopAlarm()
+        releaseWakeLock()
         super.onDestroy()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Keep service alive while waiting for owner decision.
+        super.onTaskRemoved(rootIntent)
     }
 
     private fun startAlarm() {
@@ -55,6 +64,7 @@ class AlarmForegroundService : Service() {
         }
 
         val player = MediaPlayer.create(this, R.raw.availability_request) ?: return
+        player.setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
         player.setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM)
@@ -75,6 +85,25 @@ class AlarmForegroundService : Service() {
             release()
         }
         mediaPlayer = null
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val manager = getSystemService(POWER_SERVICE) as? PowerManager ?: return
+        wakeLock = manager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "dwira:availability_alarm_wakelock",
+        ).apply {
+            setReferenceCounted(false)
+            acquire(10 * 60 * 1000L)
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wakeLock = null
     }
 
     private fun ensureChannel() {

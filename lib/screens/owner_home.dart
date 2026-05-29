@@ -53,6 +53,7 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
   String? _lastAvailabilityNotifiedDemandId;
   bool _availabilityRinging = false;
   bool _registeringPushToken = false;
+  int _consecutiveEmptyAvailabilityPolls = 0;
 
   @override
   void initState() {
@@ -211,6 +212,7 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
         _pendingAvailabilityCount = requests.length;
       });
       if (requests.isNotEmpty) {
+        _consecutiveEmptyAvailabilityPolls = 0;
         await _startAvailabilityRingtone();
         final firstRequest = Map<String, dynamic>.from(requests.first);
         final demandId = (firstRequest['id'] ?? '').toString().trim();
@@ -236,9 +238,12 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
           );
         }
       } else {
-        _lastAvailabilityNotifiedDemandId = null;
-        await _stopAvailabilityRingtone();
-        await PushNotificationService.instance.stopAvailabilityAlarm();
+        _consecutiveEmptyAvailabilityPolls += 1;
+        if (_consecutiveEmptyAvailabilityPolls >= 3) {
+          _lastAvailabilityNotifiedDemandId = null;
+          await _stopAvailabilityRingtone();
+          await PushNotificationService.instance.stopAvailabilityAlarm();
+        }
       }
       if (requests.isNotEmpty && !_showingAvailabilityDialog) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -251,8 +256,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen> {
       setState(() {
         _pendingAvailabilityCount = 0;
       });
-      await _stopAvailabilityRingtone();
-      await PushNotificationService.instance.stopAvailabilityAlarm();
+      // Keep ringing on transient network failures; stop only after a confirmed
+      // availability response flow or repeated empty polls.
     }
   }
 
