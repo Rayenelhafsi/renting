@@ -8,15 +8,45 @@ class BarcodeScannerScreen extends StatefulWidget {
   State<BarcodeScannerScreen> createState() => _BarcodeScannerScreenState();
 }
 
-class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
+class _BarcodeScannerScreenState extends State<BarcodeScannerScreen>
+    with WidgetsBindingObserver {
+  final MobileScannerController _controller = MobileScannerController();
   String? barcode;
+  bool _handlingDetection = false;
 
-  void _onDetect(BarcodeCapture barcodeCapture) {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _controller.start();
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      _controller.stop();
+    }
+  }
+
+  Future<void> _onDetect(BarcodeCapture barcodeCapture) async {
+    if (_handlingDetection) return;
     final String? code = barcodeCapture.barcodes.first.rawValue;
     if (code != null) {
+      _handlingDetection = true;
       setState(() {
         barcode = code;
       });
+      await _controller.stop();
+      if (!mounted) return;
       Navigator.of(context).pop(code);
     }
   }
@@ -32,6 +62,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
           Expanded(
             flex: 4,
             child: MobileScanner(
+              controller: _controller,
               onDetect: _onDetect,
             ),
           ),

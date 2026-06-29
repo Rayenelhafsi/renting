@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui';
 
@@ -29,15 +30,23 @@ class ApiHouseDetailsScreen extends StatefulWidget {
   State<ApiHouseDetailsScreen> createState() => _ApiHouseDetailsScreenState();
 }
 
-class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
+class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final DwiraApiService _api = DwiraApiService.instance;
   DateTime _focusedDay = DateTime.now();
   DateTime? _start;
   DateTime? _end;
   bool _submitting = false;
+  String? _cancellingPendingRequestId;
   final TextEditingController _noteController = TextEditingController();
+  late final AnimationController _pendingGlowController;
+  Timer? _calendarAutoRefreshTimer;
 
   Set<String> _blockedDays = <String>{};
+  List<Map<String, dynamic>> _pendingCalendarRequests =
+      const <Map<String, dynamic>>[];
+  List<Map<String, dynamic>> _reservationStatusRows =
+      const <Map<String, dynamic>>[];
   _CalendarChangeMode _changeMode = _CalendarChangeMode.close;
   List<_GalleryEntry> _galleryEntries = const <_GalleryEntry>[];
   bool _galleryLoading = false;
@@ -47,19 +56,51 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _pendingGlowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
     _loadCalendar();
     _loadGallery();
+    _calendarAutoRefreshTimer = Timer.periodic(
+      const Duration(seconds: 12),
+      (_) => _loadCalendar(silent: true),
+    );
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _calendarAutoRefreshTimer?.cancel();
+    _pendingGlowController.dispose();
     _noteController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadCalendar() async {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadCalendar(silent: true);
+    }
+  }
+
+  Future<void> _loadCalendar({bool silent = false}) async {
     try {
-      final rows = await _api.fetchUnavailableDates(widget.house.id);
+      final results = await Future.wait<List<Map<String, dynamic>>>([
+        _api.fetchUnavailableDates(widget.house.id),
+        _api.fetchOwnerPendingCalendarRequests(
+          widget.ownerId,
+          bienId: widget.house.id,
+        ),
+        _api.fetchOwnerReservationStatuses(
+          widget.ownerId,
+          bienId: widget.house.id,
+        ),
+      ]);
+      final rows = results[0];
+      final pendingRows = results[1];
+      final reservationRows = results[2];
       final next = <String>{};
       for (final row in rows) {
         final startRaw = (row['start_date'] ?? '').toString();
@@ -78,9 +119,11 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
       if (!mounted) return;
       setState(() {
         _blockedDays = next;
+        _pendingCalendarRequests = pendingRows;
+        _reservationStatusRows = reservationRows;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || silent) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Chargement calendrier impossible: $e')),
       );
@@ -126,6 +169,18 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
   }
 
   void _onDaySelected(DateTime selectedDay, DateTime focusedDay) {
+    if (_changeMode == _CalendarChangeMode.open &&
+        _isProtectedReservationDay(selectedDay)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cette date est reservee pour une reservation. Elle ne peut pas etre rouverte.',
+          ),
+        ),
+      );
+      setState(() => _focusedDay = focusedDay);
+      return;
+    }
     setState(() {
       _focusedDay = focusedDay;
       if (_start == null || (_start != null && _end != null)) {
@@ -150,6 +205,479 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
     return !d.isBefore(s) && !d.isAfter(e);
   }
 
+  bool _isSameCalendarDay(DateTime? a, DateTime? b) {
+    if (a == null || b == null) return false;
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  bool _isDateWithinRange(DateTime day, DateTime start, DateTime end) {
+    final d = DateTime(day.year, day.month, day.day);
+    final s = DateTime(start.year, start.month, start.day);
+    final e = DateTime(end.year, end.month, end.day);
+    return !d.isBefore(s) && !d.isAfter(e);
+  }
+
+  bool _isProtectedReservationDay(DateTime day) {
+    final current = _activeReservationStatus();
+    if (current == null) return false;
+    final status = (current['status'] ?? '').toString();
+    if (!_isFinalReservationStatus(status)) return false;
+    final start = _parseDateOnly((current['start_date'] ?? '').toString());
+    final end = _parseDateOnly((current['end_date'] ?? '').toString());
+    if (start == null || end == null) return false;
+    return _isDateWithinRange(day, start, end);
+  }
+
+  DateTime? _parseDateOnly(String raw) {
+    final normalized = raw.trim();
+    if (normalized.isEmpty) return null;
+    final parsed = DateTime.tryParse(normalized);
+    if (parsed == null) return null;
+    return DateTime(parsed.year, parsed.month, parsed.day);
+  }
+
+  String _formatAvailabilityDate(String rawDate) {
+    final parsed = DateTime.tryParse(rawDate.trim());
+    if (parsed == null) return rawDate;
+    return DateFormat(
+      'dd MMMM yyyy',
+      UiLanguageService.localeName(UiLanguageService.current.value),
+    ).format(parsed);
+  }
+
+  String _pendingRequestStatus(Map<String, dynamic> row) {
+    return (row['status'] ?? 'pending').toString().trim().toLowerCase();
+  }
+
+  Map<String, dynamic>? _primaryPendingRequest() {
+    if (_pendingCalendarRequests.isEmpty) return null;
+    final rows = [..._pendingCalendarRequests];
+    rows.sort((left, right) {
+      final leftStatus =
+          _pendingRequestStatus(left) == 'cancel_pending' ? 1 : 0;
+      final rightStatus =
+          _pendingRequestStatus(right) == 'cancel_pending' ? 1 : 0;
+      if (leftStatus != rightStatus) return rightStatus - leftStatus;
+      return ((right['submittedAt'] ?? right['dateTime'] ?? '').toString())
+          .compareTo(
+              (left['submittedAt'] ?? left['dateTime'] ?? '').toString());
+    });
+    return rows.first;
+  }
+
+  String _pendingRequestLabel(Map<String, dynamic> row) {
+    final requestType =
+        ((row['requestType'] ?? 'close').toString().trim().toLowerCase() ==
+                'open')
+            ? 'open'
+            : 'close';
+    final status = _pendingRequestStatus(row);
+    if (status == 'cancel_pending') {
+      return 'Annulation de reouverture en attente';
+    }
+    return requestType == 'open'
+        ? 'Reouverture en attente d approbation admin'
+        : 'Fermeture en attente d approbation admin';
+  }
+
+  String _pendingRequestCaption(Map<String, dynamic> row) {
+    final startDate = (row['startDate'] ?? '').toString();
+    final endDate = (row['endDate'] ?? '').toString();
+    final requestType =
+        ((row['requestType'] ?? 'close').toString().trim().toLowerCase() ==
+                'open')
+            ? 'open'
+            : 'close';
+    final status = _pendingRequestStatus(row);
+    final period =
+        'Periode: ${_formatAvailabilityDate(startDate)} - ${_formatAvailabilityDate(endDate)}';
+    if (status == 'cancel_pending') {
+      return '$period\nVotre demande d annulation de reouverture attend la confirmation admin.';
+    }
+    return '$period\n${requestType == 'open' ? 'Le calendrier reste en attente de reouverture.' : 'La fermeture sera appliquee apres validation admin.'}';
+  }
+
+  Future<void> _cancelPendingRequest(Map<String, dynamic> row) async {
+    final interactionId = (row['id'] ?? '').toString().trim();
+    if (interactionId.isEmpty) return;
+    final requestType =
+        ((row['requestType'] ?? 'close').toString().trim().toLowerCase() ==
+                'open')
+            ? 'open'
+            : 'close';
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Confirmer annulation'),
+            content: Text(
+              requestType == 'open'
+                  ? 'Etes vous sur d annuler cette demande de reouverture ?'
+                  : 'Etes vous sur d annuler cette demande de fermeture ?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Non'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Oui'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+
+    setState(() => _cancellingPendingRequestId = interactionId);
+    try {
+      final result = await _api.cancelOwnerCalendarRequest(
+        ownerId: widget.ownerId,
+        interactionId: interactionId,
+      );
+      if (!mounted) return;
+      final mode = (result['mode'] ?? '').toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            mode == 'cancel_pending'
+                ? 'Demande d annulation envoyee a l admin.'
+                : 'Demande annulee.',
+          ),
+        ),
+      );
+      await _loadCalendar();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Annulation demande impossible: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _cancellingPendingRequestId = null);
+      }
+    }
+  }
+
+  Widget _pendingRequestCard() {
+    final row = _primaryPendingRequest();
+    if (row == null) return const SizedBox.shrink();
+    final status = _pendingRequestStatus(row);
+    final requestId = (row['id'] ?? '').toString().trim();
+    final note = (row['note'] ?? '').toString().trim();
+    final canCancel = requestId.isNotEmpty && status == 'pending';
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFEFF6FF), Color(0xFFDBEAFE)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border:
+            Border.all(color: const Color(0xFF60A5FA).withValues(alpha: 0.55)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF3B82F6).withValues(alpha: 0.16),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'DEMANDE CALENDRIER EN ATTENTE',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.05,
+                    color: Color(0xFF1D4ED8),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _pendingRequestLabel(row),
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1E3A8A),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _pendingRequestCaption(row),
+                  style: const TextStyle(
+                    color: Color(0xFF1E40AF),
+                    height: 1.4,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (note.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Note: $note',
+                    style: const TextStyle(
+                      color: Color(0xFF1D4ED8),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (canCancel || status == 'cancel_pending')
+            const SizedBox(width: 12),
+          if (canCancel)
+            FilledButton(
+              onPressed: _cancellingPendingRequestId == requestId
+                  ? null
+                  : () => _cancelPendingRequest(row),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+              ),
+              child: Text(
+                _cancellingPendingRequestId == requestId
+                    ? 'Annulation...'
+                    : 'Annuler',
+              ),
+            )
+          else if (status == 'cancel_pending')
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFBFDBFE),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: const Text(
+                'Attente admin',
+                style: TextStyle(
+                  color: Color(0xFF1E3A8A),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  _PendingRangeVisual _pendingVisualForDay(DateTime day) {
+    for (final row in _pendingCalendarRequests) {
+      final start = _parseDateOnly((row['startDate'] ?? '').toString());
+      final end = _parseDateOnly((row['endDate'] ?? '').toString());
+      if (start == null || end == null) continue;
+      if (!_isDateWithinRange(day, start, end)) continue;
+
+      final isSingle = _isSameCalendarDay(start, end);
+      final isStart = _isSameCalendarDay(day, start);
+      final isEnd = _isSameCalendarDay(day, end);
+      return _PendingRangeVisual(
+        active: true,
+        requestType:
+            ((row['requestType'] ?? 'close').toString().trim().toLowerCase() ==
+                    'open')
+                ? 'open'
+                : 'close',
+        isSingleDay: isSingle,
+        isStart: isStart,
+        isEnd: isEnd,
+        isMiddle: !isSingle && !isStart && !isEnd,
+      );
+    }
+    return const _PendingRangeVisual.inactive();
+  }
+
+  Map<String, dynamic>? _activeReservationStatus() {
+    if (_reservationStatusRows.isEmpty) return null;
+    return _reservationStatusRows.first;
+  }
+
+  bool _isFinalReservationStatus(String status) {
+    final normalized = status.trim();
+    return normalized == 'succes_paiement' || normalized == 'contrat_realise';
+  }
+
+  _ReservationRangeVisual _reservationVisualForDay(DateTime day) {
+    final current = _activeReservationStatus();
+    if (current == null) return const _ReservationRangeVisual.inactive();
+    final status = (current['status'] ?? '').toString();
+    if (_isFinalReservationStatus(status)) {
+      return const _ReservationRangeVisual.inactive();
+    }
+    final start = _parseDateOnly((current['start_date'] ?? '').toString());
+    final end = _parseDateOnly((current['end_date'] ?? '').toString());
+    if (start == null || end == null) {
+      return const _ReservationRangeVisual.inactive();
+    }
+    if (!_isDateWithinRange(day, start, end)) {
+      return const _ReservationRangeVisual.inactive();
+    }
+    final isSingle = _isSameCalendarDay(start, end);
+    final isStart = _isSameCalendarDay(day, start);
+    final isEnd = _isSameCalendarDay(day, end);
+    return _ReservationRangeVisual(
+      active: true,
+      isSingleDay: isSingle,
+      isStart: isStart,
+      isEnd: isEnd,
+      isMiddle: !isSingle && !isStart && !isEnd,
+    );
+  }
+
+  _ReservationRangeVisual _confirmedReservationVisualForDay(DateTime day) {
+    final current = _activeReservationStatus();
+    if (current == null) return const _ReservationRangeVisual.inactive();
+    final status = (current['status'] ?? '').toString();
+    if (!_isFinalReservationStatus(status)) {
+      return const _ReservationRangeVisual.inactive();
+    }
+    final start = _parseDateOnly((current['start_date'] ?? '').toString());
+    final end = _parseDateOnly((current['end_date'] ?? '').toString());
+    if (start == null || end == null) {
+      return const _ReservationRangeVisual.inactive();
+    }
+    if (!_isDateWithinRange(day, start, end)) {
+      return const _ReservationRangeVisual.inactive();
+    }
+    final isSingle = _isSameCalendarDay(start, end);
+    final isStart = _isSameCalendarDay(day, start);
+    final isEnd = _isSameCalendarDay(day, end);
+    return _ReservationRangeVisual(
+      active: true,
+      isSingleDay: isSingle,
+      isStart: isStart,
+      isEnd: isEnd,
+      isMiddle: !isSingle && !isStart && !isEnd,
+    );
+  }
+
+  String _reservationStatusLabel(String status) {
+    switch (status.trim()) {
+      case 'reponse_positive_attente_confirmation_client':
+        return t('reservation_status_waiting_client');
+      case 'client_procede_vers_paiement_en_cours':
+        return t('reservation_status_client_payment');
+      case 'demande_recu_paiement':
+      case 'recu_paiement_envoye':
+        return t('reservation_status_receipt_sent');
+      case 'succes_paiement':
+        return t('reservation_status_payment_success');
+      case 'contrat_realise':
+        return t('reservation_status_contract_done');
+      default:
+        return status;
+    }
+  }
+
+  String _reservationStatusCaption(Map<String, dynamic> row) {
+    final start = (row['start_date'] ?? '').toString();
+    final end = (row['end_date'] ?? '').toString();
+    final guests = (row['guests'] ?? '1').toString();
+    return '${t('reservation_tracking_period')}: ${_formatAvailabilityDate(start)} - ${_formatAvailabilityDate(end)} • ${t('availability_travelers')}: $guests';
+  }
+
+  Widget _reservationStatusCard() {
+    final current = _activeReservationStatus();
+    if (current == null) return const SizedBox.shrink();
+    final status = (current['status'] ?? '').toString();
+    final finalStatus = _isFinalReservationStatus(status);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: finalStatus
+              ? const [Color(0xFFFFF1F1), Color(0xFFFED7D7)]
+              : const [Color(0xFFFFFBEB), Color(0xFFFEF3C7)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: finalStatus
+              ? const Color(0xFFE77777).withValues(alpha: 0.45)
+              : const Color(0xFFF59E0B).withValues(alpha: 0.35),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: (finalStatus
+                    ? const Color(0xFFE77777)
+                    : const Color(0xFFF59E0B))
+                .withValues(alpha: 0.14),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            t('reservation_tracking_title'),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.1,
+              color: finalStatus
+                  ? const Color(0xFF991B1B)
+                  : const Color(0xFF92400E),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: finalStatus
+                  ? const Color(0xFFFFE4E6)
+                  : const Color(0xFFFFF7D6),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              _reservationStatusLabel(status),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: finalStatus
+                    ? const Color(0xFF991B1B)
+                    : const Color(0xFF7C2D12),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            _reservationStatusCaption(current),
+            style: TextStyle(
+              color: finalStatus
+                  ? const Color(0xFF7F1D1D)
+                  : const Color(0xFF6B4F1D),
+              fontWeight: FontWeight.w600,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   bool _rangeContainsBlockedDays() {
     if (_start == null || _end == null) return false;
     final s = DateTime(_start!.year, _start!.month, _start!.day);
@@ -157,6 +685,20 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
     var cursor = s;
     while (!cursor.isAfter(e)) {
       if (_blockedDays.contains(DateFormat('yyyy-MM-dd').format(cursor))) {
+        return true;
+      }
+      cursor = cursor.add(const Duration(days: 1));
+    }
+    return false;
+  }
+
+  bool _rangeContainsProtectedReservationDays() {
+    if (_start == null || _end == null) return false;
+    final s = DateTime(_start!.year, _start!.month, _start!.day);
+    final e = DateTime(_end!.year, _end!.month, _end!.day);
+    var cursor = s;
+    while (!cursor.isAfter(e)) {
+      if (_isProtectedReservationDay(cursor)) {
         return true;
       }
       cursor = cursor.add(const Duration(days: 1));
@@ -192,6 +734,11 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
       final end = DateFormat('yyyy-MM-dd').format(_end!);
 
       if (_changeMode == _CalendarChangeMode.open &&
+          _rangeContainsProtectedReservationDays()) {
+        throw Exception(
+            'Selection invalide: cette plage contient des dates reservees qui ne peuvent pas etre rouvertes.');
+      }
+      if (_changeMode == _CalendarChangeMode.open &&
           !_rangeContainsBlockedDays()) {
         throw Exception(
             'Selection invalide: la plage ne contient aucune date rouge a rouvrir.');
@@ -226,6 +773,7 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
         Navigator.of(context).pop(true);
         return;
       }
+      await _loadCalendar(silent: true);
       setState(() {
         _start = null;
         _end = null;
@@ -246,38 +794,412 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
   Widget _buildDay(DateTime day) {
     final dayKey = DateFormat('yyyy-MM-dd').format(day);
     final blocked = _blockedDays.contains(dayKey);
+    final pendingVisual = _pendingVisualForDay(day);
+    final hasPendingOverlay = pendingVisual.active;
+    final reservationVisual = _reservationVisualForDay(day);
+    final hasReservationOverlay = reservationVisual.active;
+    final confirmedReservationVisual = _confirmedReservationVisualForDay(day);
+    final hasConfirmedReservationOverlay = confirmedReservationVisual.active;
+    final previousDay = DateTime(day.year, day.month, day.day - 1);
+    final nextDay = DateTime(day.year, day.month, day.day + 1);
+    final previousBlocked =
+        _blockedDays.contains(DateFormat('yyyy-MM-dd').format(previousDay));
+    final nextBlocked =
+        _blockedDays.contains(DateFormat('yyyy-MM-dd').format(nextDay));
     final inRange = _isInSelectedRange(day);
-
-    Color bg;
-    Color fg;
-    if (inRange) {
-      bg = _changeMode == _CalendarChangeMode.close
-          ? const Color(0xFFE77777)
-          : const Color(0xFF2F7D4B);
-      fg = Colors.white;
-    } else if (blocked) {
-      bg = const Color(0xFFEFA2A2);
-      fg = Colors.white;
-    } else {
-      bg = const Color(0xFFEAF6EE);
-      fg = const Color(0xFF2F7D4B);
-    }
+    final isStart = _isSameCalendarDay(day, _start);
+    final isEnd = _isSameCalendarDay(day, _end);
+    final isSingleDaySelection =
+        _start != null && (_end == null || _isSameCalendarDay(_start, _end));
+    final selectableInCurrentMode =
+        _changeMode == _CalendarChangeMode.close ? !blocked : blocked;
+    final highlightedRange = inRange && selectableInCurrentMode;
+    final baseBg = blocked ? const Color(0xFFEFA2A2) : const Color(0xFFEAF6EE);
+    final baseFg = blocked ? Colors.white : const Color(0xFF2F7D4B);
+    final rangeBg = _changeMode == _CalendarChangeMode.close
+        ? const Color(0xFFE77777)
+        : const Color(0xFF2F7D4B);
+    final pendingPulse =
+        Curves.easeInOut.transform(_pendingGlowController.value);
+    final pendingBg = pendingVisual.requestType == 'open'
+        ? Color.lerp(
+              const Color(0xFFEF4444),
+              const Color(0xFF22C55E),
+              pendingPulse,
+            ) ??
+            const Color(0xFF22C55E)
+        : Color.lerp(
+              const Color(0xFF2563EB),
+              const Color(0xFF60A5FA),
+              pendingPulse,
+            ) ??
+            const Color(0xFF3B82F6);
+    final reservationBg = Color.lerp(
+          const Color(0xFFFACC15),
+          const Color(0xFFF59E0B),
+          _pendingGlowController.value,
+        ) ??
+        const Color(0xFFFACC15);
+    final existingBlockedStart = blocked && !previousBlocked;
+    final existingBlockedEnd = blocked && !nextBlocked;
+    final existingBoundaryHalf = !highlightedRange &&
+        !isSingleDaySelection &&
+        ((existingBlockedStart && !existingBlockedEnd) ||
+            (existingBlockedEnd && !existingBlockedStart));
+    final confirmedBoundaryHalf = hasConfirmedReservationOverlay &&
+        !confirmedReservationVisual.isSingleDay &&
+        ((confirmedReservationVisual.isStart &&
+                !confirmedReservationVisual.isEnd) ||
+            (confirmedReservationVisual.isEnd &&
+                !confirmedReservationVisual.isStart));
+    final isBoundaryHalf = highlightedRange &&
+        !isSingleDaySelection &&
+        ((isStart && !isEnd) || (isEnd && !isStart));
+    final isMiddleRange =
+        highlightedRange && !isSingleDaySelection && !isStart && !isEnd;
+    final textColor = isBoundaryHalf
+        ? rangeBg
+        : confirmedBoundaryHalf
+            ? const Color(0xFFE77777)
+        : hasConfirmedReservationOverlay
+            ? Colors.white
+        : hasReservationOverlay &&
+                (reservationVisual.isMiddle || reservationVisual.isSingleDay)
+            ? Colors.white
+            : hasPendingOverlay &&
+                    (pendingVisual.isMiddle || pendingVisual.isSingleDay)
+                ? Colors.white
+                : hasPendingOverlay
+                    ? pendingBg
+                    : hasReservationOverlay
+                        ? reservationBg
+                        : existingBoundaryHalf
+                            ? const Color(0xFFE77777)
+                            : highlightedRange
+                                ? Colors.white
+                                : baseFg;
 
     return Center(
-      child: Container(
-        width: 38,
+      child: SizedBox(
+        width: 46,
         height: 38,
-        decoration: BoxDecoration(
-          color: bg,
-          shape: BoxShape.circle,
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          '${day.day}',
-          style: TextStyle(
-            color: fg,
-            fontWeight: FontWeight.w600,
-          ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            if (highlightedRange && !isSingleDaySelection)
+              Positioned.fill(
+                child: Align(
+                  alignment: isStart && !isEnd
+                      ? Alignment.centerRight
+                      : isEnd && !isStart
+                          ? Alignment.centerLeft
+                          : Alignment.center,
+                  child: Container(
+                    width: isStart || isEnd ? 23 : 46,
+                    decoration: BoxDecoration(
+                      color: rangeBg,
+                      borderRadius: BorderRadius.horizontal(
+                        left: Radius.circular(isEnd && !isStart ? 19 : 0),
+                        right: Radius.circular(isStart && !isEnd ? 19 : 0),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (hasPendingOverlay && !pendingVisual.isSingleDay)
+              Positioned.fill(
+                child: Align(
+                  alignment: pendingVisual.isStart && !pendingVisual.isEnd
+                      ? Alignment.centerRight
+                      : pendingVisual.isEnd && !pendingVisual.isStart
+                          ? Alignment.centerLeft
+                          : Alignment.center,
+                  child: AnimatedBuilder(
+                    animation: _pendingGlowController,
+                    builder: (context, child) => Container(
+                      width: pendingVisual.isStart || pendingVisual.isEnd
+                          ? 23
+                          : 46,
+                      decoration: BoxDecoration(
+                        color: pendingBg.withValues(alpha: 0.92),
+                        boxShadow: [
+                          BoxShadow(
+                            color: pendingBg.withValues(
+                              alpha:
+                                  0.28 + (_pendingGlowController.value * 0.22),
+                            ),
+                            blurRadius: 10 + (_pendingGlowController.value * 8),
+                            spreadRadius:
+                                0.6 + (_pendingGlowController.value * 1.4),
+                          ),
+                        ],
+                        borderRadius: BorderRadius.horizontal(
+                          left: Radius.circular(
+                            pendingVisual.isEnd && !pendingVisual.isStart
+                                ? 19
+                                : 0,
+                          ),
+                          right: Radius.circular(
+                            pendingVisual.isStart && !pendingVisual.isEnd
+                                ? 19
+                                : 0,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (hasConfirmedReservationOverlay &&
+                !confirmedReservationVisual.isSingleDay)
+              Positioned.fill(
+                child: Align(
+                  alignment: confirmedReservationVisual.isStart &&
+                          !confirmedReservationVisual.isEnd
+                      ? Alignment.centerRight
+                      : confirmedReservationVisual.isEnd &&
+                              !confirmedReservationVisual.isStart
+                          ? Alignment.centerLeft
+                          : Alignment.center,
+                  child: Container(
+                    width: confirmedReservationVisual.isStart ||
+                            confirmedReservationVisual.isEnd
+                        ? 23
+                        : 46,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE77777),
+                      borderRadius: BorderRadius.horizontal(
+                        left: Radius.circular(
+                          confirmedReservationVisual.isEnd &&
+                                  !confirmedReservationVisual.isStart
+                              ? 19
+                              : 0,
+                        ),
+                        right: Radius.circular(
+                          confirmedReservationVisual.isStart &&
+                                  !confirmedReservationVisual.isEnd
+                              ? 19
+                              : 0,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (hasReservationOverlay && !reservationVisual.isSingleDay)
+              Positioned.fill(
+                child: Align(
+                  alignment: reservationVisual.isStart &&
+                          !reservationVisual.isEnd
+                      ? Alignment.centerRight
+                      : reservationVisual.isEnd && !reservationVisual.isStart
+                          ? Alignment.centerLeft
+                          : Alignment.center,
+                  child: AnimatedBuilder(
+                    animation: _pendingGlowController,
+                    builder: (context, child) => Container(
+                      width:
+                          reservationVisual.isStart || reservationVisual.isEnd
+                              ? 23
+                              : 46,
+                      decoration: BoxDecoration(
+                        color: reservationBg.withValues(alpha: 0.95),
+                        boxShadow: [
+                          BoxShadow(
+                            color: reservationBg.withValues(
+                              alpha:
+                                  0.30 + (_pendingGlowController.value * 0.20),
+                            ),
+                            blurRadius: 11 + (_pendingGlowController.value * 9),
+                            spreadRadius:
+                                0.8 + (_pendingGlowController.value * 1.2),
+                          ),
+                        ],
+                        borderRadius: BorderRadius.horizontal(
+                          left: Radius.circular(
+                            reservationVisual.isEnd &&
+                                    !reservationVisual.isStart
+                                ? 19
+                                : 0,
+                          ),
+                          right: Radius.circular(
+                            reservationVisual.isStart &&
+                                    !reservationVisual.isEnd
+                                ? 19
+                                : 0,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color:
+                    isMiddleRange || (highlightedRange && isSingleDaySelection)
+                        ? rangeBg
+                        : confirmedBoundaryHalf
+                            ? const Color(0xFFEAF6EE)
+                        : hasConfirmedReservationOverlay
+                            ? const Color(0xFFE77777)
+                        : hasReservationOverlay &&
+                                (reservationVisual.isMiddle ||
+                                    reservationVisual.isSingleDay)
+                            ? reservationBg
+                            : hasPendingOverlay &&
+                                    (pendingVisual.isMiddle ||
+                                        pendingVisual.isSingleDay)
+                                ? pendingBg
+                                : existingBoundaryHalf
+                                    ? const Color(0xFFEAF6EE)
+                                    : baseBg,
+                shape: BoxShape.circle,
+                boxShadow: hasPendingOverlay
+                    ? [
+                        BoxShadow(
+                          color: pendingBg.withValues(
+                            alpha: 0.22 + (_pendingGlowController.value * 0.20),
+                          ),
+                          blurRadius: 10 + (_pendingGlowController.value * 8),
+                          spreadRadius:
+                              0.5 + (_pendingGlowController.value * 1.2),
+                        ),
+                      ]
+                    : hasReservationOverlay
+                        ? [
+                            BoxShadow(
+                              color: reservationBg.withValues(
+                                alpha: 0.24 +
+                                    (_pendingGlowController.value * 0.20),
+                              ),
+                              blurRadius:
+                                  11 + (_pendingGlowController.value * 8),
+                              spreadRadius:
+                                  0.7 + (_pendingGlowController.value * 1.2),
+                            ),
+                          ]
+                        : null,
+              ),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (isBoundaryHalf)
+                    ClipPath(
+                      clipper: _HalfCircleClipper(
+                        showRightHalf: isStart && !isEnd,
+                      ),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: rangeBg,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  if (existingBoundaryHalf)
+                    ClipPath(
+                      clipper: _HalfCircleClipper(
+                        showRightHalf:
+                            existingBlockedStart && !existingBlockedEnd,
+                      ),
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFE77777),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  if (hasPendingOverlay &&
+                      !pendingVisual.isSingleDay &&
+                      (pendingVisual.isStart != pendingVisual.isEnd))
+                    ClipPath(
+                      clipper: _HalfCircleClipper(
+                        showRightHalf:
+                            pendingVisual.isStart && !pendingVisual.isEnd,
+                      ),
+                      child: AnimatedBuilder(
+                        animation: _pendingGlowController,
+                        builder: (context, child) => Container(
+                          decoration: BoxDecoration(
+                            color: pendingBg,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: pendingBg.withValues(
+                                  alpha: 0.30 +
+                                      (_pendingGlowController.value * 0.18),
+                                ),
+                                blurRadius:
+                                    12 + (_pendingGlowController.value * 8),
+                                spreadRadius:
+                                    0.8 + (_pendingGlowController.value * 1.3),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (hasConfirmedReservationOverlay &&
+                      !confirmedReservationVisual.isSingleDay &&
+                      (confirmedReservationVisual.isStart !=
+                          confirmedReservationVisual.isEnd))
+                    ClipPath(
+                      clipper: _HalfCircleClipper(
+                        showRightHalf: confirmedReservationVisual.isStart &&
+                            !confirmedReservationVisual.isEnd,
+                      ),
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFE77777),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  if (hasReservationOverlay &&
+                      !reservationVisual.isSingleDay &&
+                      (reservationVisual.isStart != reservationVisual.isEnd))
+                    ClipPath(
+                      clipper: _HalfCircleClipper(
+                        showRightHalf: reservationVisual.isStart &&
+                            !reservationVisual.isEnd,
+                      ),
+                      child: AnimatedBuilder(
+                        animation: _pendingGlowController,
+                        builder: (context, child) => Container(
+                          decoration: BoxDecoration(
+                            color: reservationBg,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: reservationBg.withValues(
+                                  alpha: 0.32 +
+                                      (_pendingGlowController.value * 0.18),
+                                ),
+                                blurRadius:
+                                    12 + (_pendingGlowController.value * 8),
+                                spreadRadius:
+                                    0.8 + (_pendingGlowController.value * 1.3),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  Center(
+                    child: Text(
+                      '${day.day}',
+                      style: TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -598,6 +1520,133 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
     );
   }
 
+  Widget _calendarModeToggle() {
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F8F4),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFB8D7C3)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x12000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _calendarModePill(
+              mode: _CalendarChangeMode.close,
+              icon: Icons.event_busy_rounded,
+              activeIcon: Icons.check_rounded,
+              activeColor: const Color(0xFF16C7BE),
+              textColor: const Color(0xFF064E3B),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: _calendarModePill(
+              mode: _CalendarChangeMode.open,
+              icon: Icons.lock_open_rounded,
+              activeIcon: Icons.auto_awesome_rounded,
+              activeColor: const Color(0xFFEAF8EF),
+              textColor: const Color(0xFF166534),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _calendarModePill({
+    required _CalendarChangeMode mode,
+    required IconData icon,
+    required IconData activeIcon,
+    required Color activeColor,
+    required Color textColor,
+  }) {
+    final selected = _changeMode == mode;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: () {
+          if (_changeMode == mode) return;
+          setState(() {
+            _changeMode = mode;
+            _start = null;
+            _end = null;
+          });
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: selected ? activeColor : Colors.white,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: selected
+                  ? (mode == _CalendarChangeMode.close
+                      ? const Color(0xFF14B8A6)
+                      : const Color(0xFFA7D7B3))
+                  : const Color(0xFFD6E7DA),
+              width: selected ? 1.6 : 1,
+            ),
+            boxShadow: selected
+                ? const [
+                    BoxShadow(
+                      color: Color(0x16000000),
+                      blurRadius: 10,
+                      offset: Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? Colors.white.withValues(alpha: 0.72)
+                      : const Color(0xFFF3F4F6),
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  selected ? activeIcon : icon,
+                  size: 17,
+                  color: textColor,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  t(mode == _CalendarChangeMode.close
+                      ? 'close_period'
+                      : 'open_period'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 15,
+                    height: 1.1,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final modeHelp = _changeMode == _CalendarChangeMode.close
@@ -714,8 +1763,6 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
                           spacing: 10,
                           runSpacing: 10,
                           children: [
-                            _metaChip(Icons.badge_outlined,
-                                '${t('id')}: ${widget.house.id}'),
                             _metaChip(
                               Icons.verified_user_outlined,
                               widget.house.hasPending
@@ -740,38 +1787,13 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
                                 ),
                               ),
                               const SizedBox(height: 12),
-                              SegmentedButton<_CalendarChangeMode>(
-                                style: ButtonStyle(
-                                  side: WidgetStateProperty.all(
-                                    const BorderSide(color: Color(0xFF2F7D4B)),
-                                  ),
-                                ),
-                                segments: [
-                                  ButtonSegment(
-                                    value: _CalendarChangeMode.close,
-                                    icon: Icon(Icons.check),
-                                    label: Text(t('close_period')),
-                                  ),
-                                  ButtonSegment(
-                                    value: _CalendarChangeMode.open,
-                                    icon: Icon(Icons.lock_open),
-                                    label: Text(t('open_period')),
-                                  ),
-                                ],
-                                selected: {_changeMode},
-                                onSelectionChanged: (selection) {
-                                  setState(() {
-                                    _changeMode = selection.first;
-                                    _start = null;
-                                    _end = null;
-                                  });
-                                },
-                              ),
+                              _calendarModeToggle(),
                               const SizedBox(height: 12),
                               TableCalendar(
                                 firstDay: DateTime.utc(2024, 1, 1),
                                 lastDay: DateTime.utc(2031, 12, 31),
                                 focusedDay: _focusedDay,
+                                availableGestures: AvailableGestures.none,
                                 locale: UiLanguageService.localeName(language),
                                 availableCalendarFormats: const {
                                   CalendarFormat.month: 'Month',
@@ -820,8 +1842,20 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
                                   _LegendDot(
                                       color: Color(0xFFEFA2A2),
                                       label: t('unavailable')),
+                                  if (_pendingCalendarRequests.isNotEmpty)
+                                    _LegendDot(
+                                      color: const Color(0xFF60A5FA),
+                                      label: t('calendar_pending_admin'),
+                                    ),
+                                  if (_activeReservationStatus() != null)
+                                    _LegendDot(
+                                      color: const Color(0xFFFACC15),
+                                      label: t('reservation_tracking_title'),
+                                    ),
                                 ],
                               ),
+                              _reservationStatusCard(),
+                              _pendingRequestCard(),
                             ],
                           ),
                         ),
@@ -900,7 +1934,80 @@ class _ApiHouseDetailsScreenState extends State<ApiHouseDetailsScreen> {
   }
 }
 
+class _HalfCircleClipper extends CustomClipper<Path> {
+  const _HalfCircleClipper({required this.showRightHalf});
+
+  final bool showRightHalf;
+
+  @override
+  Path getClip(Size size) {
+    final path = Path();
+    if (showRightHalf) {
+      path.addRect(
+        Rect.fromLTWH(size.width / 2, 0, size.width / 2, size.height),
+      );
+    } else {
+      path.addRect(Rect.fromLTWH(0, 0, size.width / 2, size.height));
+    }
+    return path;
+  }
+
+  @override
+  bool shouldReclip(covariant _HalfCircleClipper oldClipper) {
+    return oldClipper.showRightHalf != showRightHalf;
+  }
+}
+
 enum _CalendarChangeMode { close, open }
+
+class _PendingRangeVisual {
+  final bool active;
+  final String requestType;
+  final bool isSingleDay;
+  final bool isStart;
+  final bool isEnd;
+  final bool isMiddle;
+
+  const _PendingRangeVisual({
+    required this.active,
+    required this.requestType,
+    required this.isSingleDay,
+    required this.isStart,
+    required this.isEnd,
+    required this.isMiddle,
+  });
+
+  const _PendingRangeVisual.inactive()
+      : active = false,
+        requestType = 'close',
+        isSingleDay = false,
+        isStart = false,
+        isEnd = false,
+        isMiddle = false;
+}
+
+class _ReservationRangeVisual {
+  final bool active;
+  final bool isSingleDay;
+  final bool isStart;
+  final bool isEnd;
+  final bool isMiddle;
+
+  const _ReservationRangeVisual({
+    required this.active,
+    required this.isSingleDay,
+    required this.isStart,
+    required this.isEnd,
+    required this.isMiddle,
+  });
+
+  const _ReservationRangeVisual.inactive()
+      : active = false,
+        isSingleDay = false,
+        isStart = false,
+        isEnd = false,
+        isMiddle = false;
+}
 
 class _GalleryEntry {
   final String? url;

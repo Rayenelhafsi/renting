@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -10,6 +11,11 @@ import '../firebase_options.dart' as firebase_options;
 
 final FlutterLocalNotificationsPlugin _backgroundLocalNotifications =
     FlutterLocalNotificationsPlugin();
+
+@pragma('vm:entry-point')
+void notificationTapBackground(NotificationResponse notificationResponse) {
+  // Launch payload is recovered via getNotificationAppLaunchDetails().
+}
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -28,10 +34,10 @@ class PushNotificationService {
   static const String _adminReservationKind = 'reservation_submitted';
   static const String _adminReservationAttemptKind = 'reservation_attempt';
   static const String _adminCalendarKind = 'calendar_update_request';
+  static const String _availabilityChannelId = 'owner_availability_requests_v2';
+  static const String _adminAlertChannelId = 'admin_alerts_v2';
   static const MethodChannel _availabilityAlarmChannel =
       MethodChannel('dwira/availability_alarm');
-  static const String _availabilitySoundAndroid = 'availability_request';
-  static const String _availabilitySoundApple = 'availability_request.wav';
   static bool _backgroundNotificationsReady = false;
 
   final FlutterLocalNotificationsPlugin _localNotifications =
@@ -47,26 +53,27 @@ class PushNotificationService {
 
   static const AndroidNotificationChannel _availabilityChannel =
       AndroidNotificationChannel(
-    'owner_availability_requests',
+    _availabilityChannelId,
     'Demandes de disponibilite',
     description: 'Demandes urgentes de confirmation proprietaire',
     importance: Importance.max,
-    sound: RawResourceAndroidNotificationSound(_availabilitySoundAndroid),
     playSound: true,
   );
 
   static const AndroidNotificationChannel _adminAlertChannel =
       AndroidNotificationChannel(
-    'admin_alerts',
+    _adminAlertChannelId,
     'Admin Alerts',
     description: 'Alertes admin pour reservations et calendrier',
     importance: Importance.max,
-    sound: RawResourceAndroidNotificationSound(_availabilitySoundAndroid),
     playSound: true,
   );
 
   bool _initialized = false;
   StreamSubscription<RemoteMessage>? _foregroundSubscription;
+  final StreamController<Map<String, dynamic>> _notificationTapController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Map<String, dynamic>? _launchNotificationPayload;
 
   static Future<void> ensureBackgroundNotificationsReady() async {
     if (_backgroundNotificationsReady || kIsWeb) return;
@@ -120,21 +127,21 @@ class PushNotificationService {
           fullScreenIntent: isAvailabilityRequest,
           ongoing: isAvailabilityRequest,
           autoCancel: !isAvailabilityRequest,
-          sound: isAvailabilityRequest || isAdminAlert
-              ? const RawResourceAndroidNotificationSound(
-                  _availabilitySoundAndroid,
-                )
-              : null,
         ),
         iOS: DarwinNotificationDetails(
-          sound: isAvailabilityRequest || isAdminAlert
-              ? _availabilitySoundApple
-              : null,
           presentAlert: true,
           presentBadge: true,
           presentBanner: true,
           presentList: true,
           presentSound: true,
+        ),
+      ),
+      payload: _encodePayload(
+        _buildNotificationPayload(
+          title: title,
+          body: body,
+          data: message.data,
+          messageId: message.messageId,
         ),
       ),
     );
@@ -155,7 +162,19 @@ class PushNotificationService {
       macOS: iosSettings,
     );
 
-    await _localNotifications.initialize(initSettings);
+    await _localNotifications.initialize(
+      initSettings,
+      onDidReceiveNotificationResponse: _handleNotificationResponse,
+      onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
+    );
+
+    final launchDetails =
+        await _localNotifications.getNotificationAppLaunchDetails();
+    if (launchDetails?.didNotificationLaunchApp == true) {
+      _launchNotificationPayload = _decodePayload(
+        launchDetails?.notificationResponse?.payload,
+      );
+    }
 
     final androidPlugin =
         _localNotifications.resolvePlatformSpecificImplementation<
@@ -196,6 +215,14 @@ class PushNotificationService {
       FirebaseMessaging.instance.onTokenRefresh;
 
   Stream<RemoteMessage> get onMessage => FirebaseMessaging.onMessage;
+  Stream<Map<String, dynamic>> get onNotificationTap =>
+      _notificationTapController.stream;
+
+  Map<String, dynamic>? takeLaunchNotificationPayload() {
+    final payload = _launchNotificationPayload;
+    _launchNotificationPayload = null;
+    return payload;
+  }
 
   Future<void> stopAvailabilityAlarm() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
@@ -256,6 +283,14 @@ class PushNotificationService {
       body: body.isEmpty ? null : body,
       isAvailabilityRequest: isAvailabilityRequest,
       isAdminAlert: isAdminAlert,
+      payload: _encodePayload(
+        _buildNotificationPayload(
+          title: title,
+          body: body,
+          data: message.data,
+          messageId: message.messageId,
+        ),
+      ),
     );
   }
 
@@ -265,6 +300,7 @@ class PushNotificationService {
     required String? body,
     required bool isAvailabilityRequest,
     required bool isAdminAlert,
+    String? payload,
   }) async {
     final channel = isAvailabilityRequest
         ? _availabilityChannel
@@ -288,16 +324,8 @@ class PushNotificationService {
           fullScreenIntent: isAvailabilityRequest,
           ongoing: isAvailabilityRequest,
           autoCancel: !isAvailabilityRequest,
-          sound: isAvailabilityRequest || isAdminAlert
-              ? const RawResourceAndroidNotificationSound(
-                  _availabilitySoundAndroid,
-                )
-              : null,
         ),
         iOS: DarwinNotificationDetails(
-          sound: isAvailabilityRequest || isAdminAlert
-              ? _availabilitySoundApple
-              : null,
           presentAlert: true,
           presentBadge: true,
           presentBanner: true,
@@ -305,7 +333,54 @@ class PushNotificationService {
           presentSound: true,
         ),
       ),
+      payload: payload,
     );
+  }
+
+  void _handleNotificationResponse(NotificationResponse notificationResponse) {
+    final payload = _decodePayload(notificationResponse.payload);
+    if (payload == null) return;
+    _notificationTapController.add(payload);
+  }
+
+  static Map<String, dynamic> _buildNotificationPayload({
+    required String title,
+    required String? body,
+    required Map<String, dynamic> data,
+    required String? messageId,
+  }) {
+    return <String, dynamic>{
+      'title': title,
+      'body': body ?? '',
+      'messageId': messageId ?? '',
+      'data': data,
+    };
+  }
+
+  static String? _encodePayload(Map<String, dynamic> payload) {
+    try {
+      return jsonEncode(payload);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, dynamic>? _decodePayload(String? payload) {
+    if (payload == null || payload.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(payload);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map) {
+        return decoded.map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+      }
+    } catch (_) {
+      return null;
+    }
+    return null;
   }
 
   String _stringValue(dynamic value) {

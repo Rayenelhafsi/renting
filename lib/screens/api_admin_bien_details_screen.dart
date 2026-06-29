@@ -243,6 +243,14 @@ class _ApiAdminBienDetailsScreenState extends State<ApiAdminBienDetailsScreen> {
   }
 
   Future<void> _approveRequest(String id) async {
+    final current = _pendingRequests.firstWhere(
+      (request) => (request['id'] ?? '').toString() == id,
+      orElse: () => <String, dynamic>{},
+    );
+    final currentMetadata = (current['metadata'] is Map)
+        ? Map<String, dynamic>.from(current['metadata'] as Map)
+        : <String, dynamic>{};
+    final isCancelPending = _isCancelPendingRequest(currentMetadata);
     try {
       await _api.approveCalendarRequestAdmin(id);
       if (mounted) {
@@ -276,7 +284,13 @@ class _ApiAdminBienDetailsScreenState extends State<ApiAdminBienDetailsScreen> {
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Demande approuvee.')),
+        SnackBar(
+          content: Text(
+            isCancelPending
+                ? 'Annulation de reouverture approuvee.'
+                : 'Demande approuvee.',
+          ),
+        ),
       );
       await _loadAll();
     } catch (e) {
@@ -287,7 +301,22 @@ class _ApiAdminBienDetailsScreenState extends State<ApiAdminBienDetailsScreen> {
     }
   }
 
+  bool _isCancelPendingRequest(Map<String, dynamic> metadata) {
+    final status = (metadata['status'] ?? 'pending').toString().toLowerCase();
+    final requestType =
+        (metadata['requestType'] ?? 'close').toString().toLowerCase();
+    return status == 'cancel_pending' && requestType == 'open';
+  }
+
   Future<void> _rejectRequest(String id) async {
+    final current = _pendingRequests.firstWhere(
+      (request) => (request['id'] ?? '').toString() == id,
+      orElse: () => <String, dynamic>{},
+    );
+    final currentMetadata = (current['metadata'] is Map)
+        ? Map<String, dynamic>.from(current['metadata'] as Map)
+        : <String, dynamic>{};
+    final isCancelPending = _isCancelPendingRequest(currentMetadata);
     try {
       await _api.rejectCalendarRequestAdmin(id);
       if (mounted) {
@@ -321,7 +350,13 @@ class _ApiAdminBienDetailsScreenState extends State<ApiAdminBienDetailsScreen> {
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Demande rejetee.')),
+        SnackBar(
+          content: Text(
+            isCancelPending
+                ? 'Annulation de reouverture rejetee.'
+                : 'Demande rejetee.',
+          ),
+        ),
       );
       await _loadAll();
     } catch (e) {
@@ -605,6 +640,8 @@ class _ApiAdminBienDetailsScreenState extends State<ApiAdminBienDetailsScreen> {
                                     (metadata['note'] ?? '').toString();
                                 final requestId =
                                     (request['id'] ?? '').toString();
+                                final isCancelPending =
+                                    _isCancelPendingRequest(metadata);
 
                                 return Container(
                                   margin: const EdgeInsets.only(bottom: 10),
@@ -621,7 +658,7 @@ class _ApiAdminBienDetailsScreenState extends State<ApiAdminBienDetailsScreen> {
                                     children: [
                                       Text('Owner: $ownerId'),
                                       Text(
-                                        'Type: ${requestType == 'open' ? 'Reouverture' : 'Fermeture'}',
+                                        'Type: ${isCancelPending ? 'Annulation de reouverture' : requestType == 'open' ? 'Reouverture' : 'Fermeture'}',
                                       ),
                                       Text('Plage: $startDate -> $endDate'),
                                       if (note.isNotEmpty) Text('Note: $note'),
@@ -636,7 +673,11 @@ class _ApiAdminBienDetailsScreenState extends State<ApiAdminBienDetailsScreen> {
                                                       requestId),
                                               icon: const Icon(
                                                   Icons.check_circle_outline),
-                                              label: const Text('Approve'),
+                                              label: Text(
+                                                isCancelPending
+                                                    ? 'Confirmer annulation'
+                                                    : 'Approve',
+                                              ),
                                               style: ElevatedButton.styleFrom(
                                                 backgroundColor:
                                                     const Color(0xFF2F7D4B),
@@ -652,7 +693,11 @@ class _ApiAdminBienDetailsScreenState extends State<ApiAdminBienDetailsScreen> {
                                                   : () =>
                                                       _rejectRequest(requestId),
                                               icon: const Icon(Icons.close),
-                                              label: const Text('Reject'),
+                                              label: Text(
+                                                isCancelPending
+                                                    ? 'Refuser annulation'
+                                                    : 'Reject',
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -689,6 +734,8 @@ class _ApiAdminBienDetailsScreenState extends State<ApiAdminBienDetailsScreen> {
                                 final reviewedAt =
                                     (metadata['reviewedAt'] ?? '').toString();
                                 final isApproved = status == 'approved';
+                                final isCancelPending =
+                                    _isCancelPendingRequest(metadata);
 
                                 return Container(
                                   margin: const EdgeInsets.only(bottom: 10),
@@ -710,7 +757,7 @@ class _ApiAdminBienDetailsScreenState extends State<ApiAdminBienDetailsScreen> {
                                     children: [
                                       Text('Owner: $ownerId'),
                                       Text(
-                                          'Type: ${requestType == 'open' ? 'Reouverture' : 'Fermeture'}'),
+                                          'Type: ${isCancelPending ? 'Annulation de reouverture' : requestType == 'open' ? 'Reouverture' : 'Fermeture'}'),
                                       Text('Plage: $startDate -> $endDate'),
                                       Text(
                                           'Statut: ${isApproved ? 'Approuvee' : 'Rejetee'}'),

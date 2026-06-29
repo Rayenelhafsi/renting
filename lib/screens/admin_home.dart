@@ -423,14 +423,15 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   Future<void> _approveCalendarRequest(Map<String, dynamic> request) async {
     final interactionId = (request['id'] ?? '').toString().trim();
     if (interactionId.isEmpty) return;
+    final metadata = (request['metadata'] is Map)
+        ? Map<String, dynamic>.from(request['metadata'] as Map)
+        : <String, dynamic>{};
+    final isCancelPending = _isCancelPendingCalendarRequest(metadata);
     try {
       await _api.approveCalendarRequestAdmin(interactionId);
       if (mounted) {
         setState(() {
           _processedApprovalIds.add(interactionId);
-          final metadata = (request['metadata'] is Map)
-              ? Map<String, dynamic>.from(request['metadata'] as Map)
-              : <String, dynamic>{};
           metadata['status'] = 'approved';
           metadata['reviewedAt'] = DateTime.now().toIso8601String();
           final next = Map<String, dynamic>.from(request);
@@ -441,8 +442,13 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Demande approuvee et calendrier mis a jour.')),
+        SnackBar(
+          content: Text(
+            isCancelPending
+                ? 'Annulation de reouverture approuvee.'
+                : 'Demande approuvee et calendrier mis a jour.',
+          ),
+        ),
       );
       _refreshAllApiTabs();
     } catch (e) {
@@ -456,14 +462,15 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   Future<void> _rejectCalendarRequest(Map<String, dynamic> request) async {
     final interactionId = (request['id'] ?? '').toString().trim();
     if (interactionId.isEmpty) return;
+    final metadata = (request['metadata'] is Map)
+        ? Map<String, dynamic>.from(request['metadata'] as Map)
+        : <String, dynamic>{};
+    final isCancelPending = _isCancelPendingCalendarRequest(metadata);
     try {
       await _api.rejectCalendarRequestAdmin(interactionId);
       if (mounted) {
         setState(() {
           _processedApprovalIds.add(interactionId);
-          final metadata = (request['metadata'] is Map)
-              ? Map<String, dynamic>.from(request['metadata'] as Map)
-              : <String, dynamic>{};
           metadata['status'] = 'rejected';
           metadata['reviewedAt'] = DateTime.now().toIso8601String();
           final next = Map<String, dynamic>.from(request);
@@ -473,7 +480,13 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Demande rejetee.')),
+        SnackBar(
+          content: Text(
+            isCancelPending
+                ? 'Annulation de reouverture rejetee.'
+                : 'Demande rejetee.',
+          ),
+        ),
       );
       _refreshAllApiTabs();
     } catch (e) {
@@ -482,6 +495,13 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         SnackBar(content: Text('Echec rejet: $e')),
       );
     }
+  }
+
+  bool _isCancelPendingCalendarRequest(Map<String, dynamic> metadata) {
+    final status = (metadata['status'] ?? 'pending').toString().toLowerCase();
+    final requestType =
+        (metadata['requestType'] ?? 'close').toString().toLowerCase();
+    return status == 'cancel_pending' && requestType == 'open';
   }
 
   Future<List<_ApiOwner>> _fetchApiOwnersWithHouses() async {
@@ -839,6 +859,10 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                       final status = (metadata['status'] ?? 'pending')
                           .toString()
                           .toLowerCase();
+                      final requestType =
+                          (metadata['requestType'] ?? 'close').toString();
+                      final isCancelPending =
+                          _isCancelPendingCalendarRequest(metadata);
 
                       return Card(
                         child: Padding(
@@ -856,6 +880,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                               const SizedBox(height: 6),
                               Text('Owner ID: $ownerId'),
                               Text('Plage: $startDate -> $endDate'),
+                              Text(
+                                'Type: ${isCancelPending ? 'Annulation de reouverture' : requestType == 'open' ? 'Reouverture' : 'Fermeture'}',
+                              ),
                               if (note.isNotEmpty) ...[
                                 const SizedBox(height: 6),
                                 Text('Note: $note'),
@@ -877,7 +904,11 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                             _approveCalendarRequest(req),
                                         icon: const Icon(
                                             Icons.check_circle_outline),
-                                        label: const Text('Approve'),
+                                        label: Text(
+                                          isCancelPending
+                                              ? 'Confirmer annulation'
+                                              : 'Approve',
+                                        ),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor:
                                               const Color(0xFF2F7D4B),
@@ -891,7 +922,11 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                         onPressed: () =>
                                             _rejectCalendarRequest(req),
                                         icon: const Icon(Icons.close),
-                                        label: const Text('Reject'),
+                                        label: Text(
+                                          isCancelPending
+                                              ? 'Refuser annulation'
+                                              : 'Reject',
+                                        ),
                                       ),
                                     ),
                                   ],

@@ -341,11 +341,13 @@ class DwiraApiService {
     var filtered = rows.where((row) {
       final status = _calendarRequestStatus(row);
       final key = _calendarRequestKey(row);
-      if (status == 'pending' && (hasFinalByKey[key] ?? false)) {
+      if ((status == 'pending' || status == 'cancel_pending') &&
+          (hasFinalByKey[key] ?? false)) {
         return false;
       }
       if (allowedStatuses == null || allowedStatuses.isEmpty) return true;
-      return allowedStatuses.contains(status);
+      if (allowedStatuses.contains(status)) return true;
+      return allowedStatuses.contains('pending') && status == 'cancel_pending';
     }).toList();
 
     if (allowedStatuses != null &&
@@ -386,6 +388,64 @@ class DwiraApiService {
     return fetchCalendarUpdateRequestsAdmin(
       statuses: {'approved', 'rejected'},
     );
+  }
+
+  Future<List<Map<String, dynamic>>> fetchOwnerPendingCalendarRequests(
+    String ownerId, {
+    String? bienId,
+  }) async {
+    final normalizedOwnerId = ownerId.trim();
+    if (normalizedOwnerId.isEmpty) return const <Map<String, dynamic>>[];
+    final normalizedBienId = (bienId ?? '').trim();
+    final response = await _request(
+      'GET',
+      '/api/mobile/owners/${Uri.encodeComponent(normalizedOwnerId)}/calendar-requests',
+      query: {
+        'statuses': 'pending',
+        if (normalizedBienId.isNotEmpty) 'bien_id': normalizedBienId,
+      },
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          _errorMessage(response, 'Chargement demandes calendrier impossible'));
+    }
+
+    final decoded = _decodeJson(response);
+    if (decoded is! List) return const <Map<String, dynamic>>[];
+    return decoded
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> cancelOwnerCalendarRequest({
+    required String ownerId,
+    required String interactionId,
+  }) async {
+    final normalizedOwnerId = ownerId.trim();
+    final normalizedInteractionId = interactionId.trim();
+    if (normalizedOwnerId.isEmpty || normalizedInteractionId.isEmpty) {
+      throw Exception('Annulation demande calendrier impossible');
+    }
+
+    final response = await _request(
+      'POST',
+      '/api/mobile/owners/${Uri.encodeComponent(normalizedOwnerId)}/calendar-requests/${Uri.encodeComponent(normalizedInteractionId)}/cancel',
+      body: const <String, dynamic>{},
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        _errorMessage(response, 'Annulation demande calendrier impossible'),
+      );
+    }
+
+    final decoded = _decodeJson(response);
+    if (decoded is Map) {
+      return Map<String, dynamic>.from(decoded);
+    }
+    return const <String, dynamic>{'ok': true};
   }
 
   Future<List<Map<String, dynamic>>> fetchChatMessagesAdmin() async {
@@ -776,6 +836,32 @@ class DwiraApiService {
       throw Exception(
           _errorMessage(response, 'Reponse disponibilite impossible'));
     }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchOwnerReservationStatuses(
+    String ownerId, {
+    String? bienId,
+  }) async {
+    final normalizedOwnerId = ownerId.trim();
+    if (normalizedOwnerId.isEmpty) return const <Map<String, dynamic>>[];
+    final normalizedBienId = (bienId ?? '').trim();
+    final response = await _request(
+      'GET',
+      '/api/mobile/owners/${Uri.encodeComponent(normalizedOwnerId)}/reservation-statuses',
+      query: {
+        if (normalizedBienId.isNotEmpty) 'bien_id': normalizedBienId,
+      },
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          _errorMessage(response, 'Chargement suivi reservation impossible'));
+    }
+    final decoded = _decodeJson(response);
+    if (decoded is! List) return const <Map<String, dynamic>>[];
+    return decoded
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
   }
 
   Future<void> approveCalendarRequestAdmin(String interactionId) async {

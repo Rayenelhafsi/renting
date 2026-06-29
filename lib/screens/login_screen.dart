@@ -21,6 +21,34 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController ownerIdController = TextEditingController();
   final HousesRepository _housesRepository = const HousesRepository();
   bool isLoading = false;
+  bool _adminPasswordHidden = true;
+
+  InputDecoration _fieldDecoration({
+    required String label,
+    IconData? icon,
+    Widget? suffixIcon,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      prefixIcon: icon == null ? null : Icon(icon),
+      suffixIcon: suffixIcon,
+      filled: true,
+      fillColor: const Color(0xFFF7FBF8),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(color: Color(0xFFDCE8E0), width: 1.2),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(color: Color(0xFF177245), width: 1.5),
+      ),
+    );
+  }
 
   Future<void> login() async {
     setState(() => isLoading = true);
@@ -121,13 +149,18 @@ class _LoginScreenState extends State<LoginScreen> {
         MaterialPageRoute(builder: (_) => const BarcodeScannerScreen()),
       );
 
+      if (!mounted) return;
+
       if (scannedCode == null || scannedCode == '') {
         // User cancelled the scan or no code scanned
         return;
       }
 
+      setState(() => isLoading = true);
+
       final ownerExists = await _housesRepository.ownerExists(scannedCode);
       if (!ownerExists) {
+        setState(() => isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Invalid QR code')),
         );
@@ -142,13 +175,20 @@ class _LoginScreenState extends State<LoginScreen> {
       // Do NOT create or update Firestore document for owner on login
       await PersistedSession.saveOwner(scannedCode);
 
+      if (!mounted) return;
+
       // Navigate to owner home screen
-      Navigator.pushReplacement(
+      Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(
-            builder: (_) => OwnerHomeScreen(ownerId: scannedCode)),
+          builder: (_) => OwnerHomeScreen(ownerId: scannedCode),
+        ),
+        (route) => false,
       );
     } catch (e) {
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error scanning QR code: $e')),
       );
@@ -163,9 +203,9 @@ class _LoginScreenState extends State<LoginScreen> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFF8F4F0), Color(0xFFF0EDE8)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFF4FBF7), Color(0xFFF7F3EC), Color(0xFFEAF6EE)],
           ),
         ),
         child: Center(
@@ -173,97 +213,213 @@ class _LoginScreenState extends State<LoginScreen> {
               ? const CircularProgressIndicator()
               : ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 560),
-                  child: Card(
+                  child: Container(
                     margin: const EdgeInsets.all(20),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFDFEFD),
+                      borderRadius: BorderRadius.circular(32),
+                      border: Border.all(color: const Color(0xFFE2ECE5)),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x14000000),
+                          blurRadius: 28,
+                          offset: Offset(0, 18),
+                        ),
+                      ],
                     ),
-                    elevation: 8,
                     child: Padding(
-                      padding: EdgeInsets.all(compact ? 18 : 28),
+                      padding: EdgeInsets.all(compact ? 20 : 30),
                       child: SingleChildScrollView(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              width: compact ? 140 : 164,
-                              height: compact ? 140 : 164,
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: const LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [
-                                    Color(0xFF0F5132),
-                                    Color(0xFF1F8A5B)
+                            Center(
+                              child: Container(
+                                width: compact ? 128 : 150,
+                                height: compact ? 128 : 150,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: const LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [
+                                      Color(0xFF0F5132),
+                                      Color(0xFF16693F),
+                                      Color(0xFF1F8A5B)
+                                    ],
+                                  ),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Color(0x220F5132),
+                                      blurRadius: 30,
+                                      offset: Offset(0, 14),
+                                    ),
                                   ],
                                 ),
-                                boxShadow: const [
-                                  BoxShadow(
-                                    color: Color(0x40000000),
-                                    blurRadius: 24,
-                                    offset: Offset(0, 10),
+                                child: ClipOval(
+                                  child: Image.asset(
+                                    'assets/images/logo.png',
+                                    fit: BoxFit.cover,
                                   ),
-                                ],
-                              ),
-                              child: ClipOval(
-                                child: Image.asset(
-                                  'assets/images/logo.png',
-                                  fit: BoxFit.cover,
                                 ),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            const Text(
-                              'Portail Proprietaires',
-                              style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w600,
                               ),
                             ),
                             const SizedBox(height: 20),
-                            TextField(
-                              controller: ownerIdController,
-                              decoration: const InputDecoration(
-                                labelText: 'ID proprietaire',
-                                border: OutlineInputBorder(),
+                            const Center(
+                              child: Text(
+                                'Connexion',
+                                style: TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF0F5132),
+                                ),
                               ),
                             ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: loginWithOwnerId,
-                                child: const Text('Connexion Proprietaire'),
+                            const SizedBox(height: 8),
+                            const Center(
+                              child: Text(
+                                'Acces proprietaire et administration',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xFF6B7280),
+                                ),
                               ),
                             ),
-                            const SizedBox(height: 10),
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                onPressed: scanQRCode,
-                                icon: const Icon(Icons.qr_code_scanner),
-                                label: const Text('Connexion QR Code'),
+                            const SizedBox(height: 24),
+                            Container(
+                              padding: const EdgeInsets.all(18),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF6FBF8),
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(color: const Color(0xFFDCE8E0)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Connexion Proprietaire',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF0F5132),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  const Text(
+                                    'Entrez votre identifiant ou utilisez le QR code.',
+                                    style: TextStyle(color: Color(0xFF6B7280)),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  TextField(
+                                    controller: ownerIdController,
+                                    decoration: _fieldDecoration(
+                                      label: 'ID proprietaire',
+                                      icon: Icons.badge_outlined,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton(
+                                      onPressed: loginWithOwnerId,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF14683F),
+                                        foregroundColor: Colors.white,
+                                        elevation: 0,
+                                        padding: const EdgeInsets.symmetric(vertical: 16),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(18),
+                                        ),
+                                      ),
+                                      child: const Text(
+                                        'Connexion Proprietaire',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      onPressed: scanQRCode,
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: const Color(0xFF14683F),
+                                        backgroundColor: Colors.white,
+                                        side: const BorderSide(
+                                          color: Color(0xFFB7D4C0),
+                                        ),
+                                        padding: const EdgeInsets.symmetric(vertical: 15),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(18),
+                                        ),
+                                      ),
+                                      icon: const Icon(Icons.qr_code_scanner),
+                                      label: const Text(
+                                        'Connexion QR Code',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 15,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: 14),
-                            const Divider(),
-                            const SizedBox(height: 14),
+                            const SizedBox(height: 18),
+                            Row(
+                              children: const [
+                                Expanded(
+                                  child: Divider(color: Color(0xFFD6E1DB)),
+                                ),
+                                Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 12),
+                                  child: Text(
+                                    'Administration',
+                                    style: TextStyle(
+                                      color: Color(0xFF7A8A80),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Divider(color: Color(0xFFD6E1DB)),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
                             TextField(
                               controller: usernameController,
-                              decoration: const InputDecoration(
-                                labelText: 'Email admin',
-                                border: OutlineInputBorder(),
+                              decoration: _fieldDecoration(
+                                label: 'Email admin',
+                                icon: Icons.alternate_email_rounded,
                               ),
                             ),
                             const SizedBox(height: 12),
                             TextField(
                               controller: passwordController,
-                              obscureText: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Mot de passe',
-                                border: OutlineInputBorder(),
+                              obscureText: _adminPasswordHidden,
+                              decoration: _fieldDecoration(
+                                label: 'Mot de passe',
+                                icon: Icons.lock_outline_rounded,
+                                suffixIcon: IconButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      _adminPasswordHidden =
+                                          !_adminPasswordHidden;
+                                    });
+                                  },
+                                  icon: Icon(
+                                    _adminPasswordHidden
+                                        ? Icons.visibility_off_outlined
+                                        : Icons.visibility_outlined,
+                                  ),
+                                ),
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -271,7 +427,22 @@ class _LoginScreenState extends State<LoginScreen> {
                               width: double.infinity,
                               child: ElevatedButton(
                                 onPressed: login,
-                                child: const Text('Connexion Admin'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF0F5132),
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Connexion Admin',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 16,
+                                  ),
+                                ),
                               ),
                             ),
                           ],

@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -63,15 +64,21 @@ class AlarmForegroundService : Service() {
             return
         }
 
-        val player = MediaPlayer.create(this, R.raw.availability_request) ?: return
-        player.setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
-        player.setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build(),
-        )
-        player.isLooping = true
+        val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            ?: return
+        val player = MediaPlayer().apply {
+            setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
+            isLooping = true
+            setDataSource(this@AlarmForegroundService, soundUri)
+            prepare()
+        }
         player.start()
         mediaPlayer = player
     }
@@ -156,7 +163,7 @@ class AlarmForegroundService : Service() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "owner_availability_requests"
+        private const val CHANNEL_ID = "owner_availability_requests_v2"
         private const val NOTIFICATION_ID = 41001
         private const val ACTION_START = "com.dwiraimmobilier.START_AVAILABILITY_ALARM"
         private const val ACTION_STOP = "com.dwiraimmobilier.STOP_AVAILABILITY_ALARM"

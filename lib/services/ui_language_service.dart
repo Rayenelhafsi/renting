@@ -184,6 +184,101 @@ class UiLanguageService {
       UiLanguage.en: 'Pending validation',
       UiLanguage.ar: 'بانتظار التحقق',
     },
+    'calendar_pending_admin': {
+      UiLanguage.fr: 'Demande calendrier en attente',
+      UiLanguage.en: 'Calendar request pending',
+      UiLanguage.ar: 'Ø·Ù„Ø¨ ØªÙ‚ÙˆÙŠÙ… Ù‚ÙŠØ¯ Ø§Ù„Ø§Ù†ØªØ¸Ø§Ø±',
+    },
+    'reservation_tracking_title': {
+      UiLanguage.fr: 'Suivi reservation',
+      UiLanguage.en: 'Reservation tracking',
+      UiLanguage.ar: 'Ù…ØªØ§Ø¨Ø¹Ø© Ø§Ù„Ø­Ø¬Ø²',
+    },
+    'reservation_tracking_period': {
+      UiLanguage.fr: 'Periode',
+      UiLanguage.en: 'Period',
+      UiLanguage.ar: 'Ø§Ù„ÙØªØ±Ø©',
+    },
+    'reservation_status_waiting_client': {
+      UiLanguage.fr: 'Reponse positive en attente confirmation client',
+      UiLanguage.en: 'Positive response awaiting client confirmation',
+      UiLanguage.ar: 'Ø±Ø¯ Ø¥ÙŠØ¬Ø§Ø¨ÙŠ ÙÙŠ Ø§Ù†ØªØ¸Ø§Ø± ØªØ£ÙƒÙŠØ¯ Ø§Ù„Ø¹Ù…ÙŠÙ„',
+    },
+    'reservation_status_client_payment': {
+      UiLanguage.fr: 'Client en cours de paiement',
+      UiLanguage.en: 'Client payment in progress',
+      UiLanguage.ar: 'Ø§Ù„Ø¹Ù…ÙŠÙ„ ÙÙŠ Ø·ÙˆØ± Ø§Ù„Ø¯ÙØ¹',
+    },
+    'reservation_status_receipt_sent': {
+      UiLanguage.fr: 'Recu de paiement envoye',
+      UiLanguage.en: 'Payment receipt sent',
+      UiLanguage.ar: 'ØªÙ… Ø¥Ø±Ø³Ø§Ù„ Ø¥ÙŠØµØ§Ù„ Ø§Ù„Ø¯ÙØ¹',
+    },
+    'reservation_status_payment_success': {
+      UiLanguage.fr: 'Succes paiement',
+      UiLanguage.en: 'Payment success',
+      UiLanguage.ar: 'Ù†Ø¬Ø§Ø­ Ø§Ù„Ø¯ÙØ¹',
+    },
+    'reservation_status_contract_done': {
+      UiLanguage.fr: 'Contrat realise',
+      UiLanguage.en: 'Contract completed',
+      UiLanguage.ar: 'ØªÙ… Ø¥Ù†Ø¬Ø§Ø² Ø§Ù„Ø¹Ù‚Ø¯',
+    },
+    'availability_confirm_title': {
+      UiLanguage.fr: 'Confirmer disponibilite',
+      UiLanguage.en: 'Confirm availability',
+      UiLanguage.ar: 'تأكيد التوفر',
+    },
+    'availability_arrival': {
+      UiLanguage.fr: 'Arrivee',
+      UiLanguage.en: 'Arrival',
+      UiLanguage.ar: 'الوصول',
+    },
+    'availability_departure': {
+      UiLanguage.fr: 'Depart',
+      UiLanguage.en: 'Departure',
+      UiLanguage.ar: 'المغادرة',
+    },
+    'availability_travelers': {
+      UiLanguage.fr: 'Voyageurs',
+      UiLanguage.en: 'Travelers',
+      UiLanguage.ar: 'المسافرون',
+    },
+    'availability_adult_singular': {
+      UiLanguage.fr: 'adulte',
+      UiLanguage.en: 'adult',
+      UiLanguage.ar: 'بالغ',
+    },
+    'availability_adult_plural': {
+      UiLanguage.fr: 'adultes',
+      UiLanguage.en: 'adults',
+      UiLanguage.ar: 'بالغين',
+    },
+    'availability_child_singular': {
+      UiLanguage.fr: 'enfant',
+      UiLanguage.en: 'child',
+      UiLanguage.ar: 'طفل',
+    },
+    'availability_child_plural': {
+      UiLanguage.fr: 'enfants',
+      UiLanguage.en: 'children',
+      UiLanguage.ar: 'اطفال',
+    },
+    'availability_question': {
+      UiLanguage.fr: 'Ce bien est-il disponible pour cette periode ?',
+      UiLanguage.en: 'Is this property available for this period?',
+      UiLanguage.ar: 'هل هذا العقار متاح خلال هذه الفترة؟',
+    },
+    'availability_no': {
+      UiLanguage.fr: 'Non disponible',
+      UiLanguage.en: 'Not available',
+      UiLanguage.ar: 'غير متاح',
+    },
+    'availability_yes': {
+      UiLanguage.fr: 'Oui disponible',
+      UiLanguage.en: 'Yes available',
+      UiLanguage.ar: 'نعم متاح',
+    },
   };
 
   static String t(String key) {
