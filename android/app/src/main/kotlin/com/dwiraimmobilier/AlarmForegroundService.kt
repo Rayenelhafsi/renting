@@ -1,4 +1,4 @@
-package com.example.house_rental_manager
+﻿package com.dwiraimmobilier
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -158,8 +158,8 @@ class AlarmForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "owner_availability_requests"
         private const val NOTIFICATION_ID = 41001
-        private const val ACTION_START = "com.example.house_rental_manager.START_AVAILABILITY_ALARM"
-        private const val ACTION_STOP = "com.example.house_rental_manager.STOP_AVAILABILITY_ALARM"
+        private const val ACTION_START = "com.dwiraimmobilier.START_AVAILABILITY_ALARM"
+        private const val ACTION_STOP = "com.dwiraimmobilier.STOP_AVAILABILITY_ALARM"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_BODY = "body"
         private const val EXTRA_DEMAND_ID = "demandId"
@@ -182,3 +182,4 @@ class AlarmForegroundService : Service() {
         }
     }
 }
+

@@ -1,4 +1,4 @@
-package com.example.house_rental_manager
+﻿package com.dwiraimmobilier
 
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -34,3 +34,4 @@ class AvailabilityFirebaseMessagingService : FirebaseMessagingService() {
         private const val AVAILABILITY_KIND = "reservation_availability_request"
     }
 }
+

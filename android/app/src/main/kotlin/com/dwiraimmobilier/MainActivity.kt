@@ -1,4 +1,4 @@
-package com.example.house_rental_manager
+﻿package com.dwiraimmobilier
 
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
@@ -27,3 +27,4 @@ class MainActivity : FlutterActivity() {
         private const val AVAILABILITY_ALARM_CHANNEL = "dwira/availability_alarm"
     }
 }
+

@@ -7,6 +7,25 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:269507169080:android:3ea316633850ac9d510fcd",
+        "android_client_info": {
+          "package_name": "com.dwiraimmobilier"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCHC9N6_rooZCXXllkNBX507eYqAcvK4sY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:269507169080:android:91374a3c259866ec510fcd",
         "android_client_info": {
           "package_name": "com.example.house_rental_manager"
