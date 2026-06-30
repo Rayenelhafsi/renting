@@ -43,6 +43,8 @@ import flutter_local_notifications
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         Messaging.messaging().apnsToken = deviceToken
+        let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+        NSLog("APNs token registered: \(token)")
         super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
     }
 
