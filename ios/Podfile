@@ -43,6 +43,9 @@ post_install do |installer|
 
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+      config.build_settings['CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]'] = 'NO'
+      config.build_settings['CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]'] = 'NO'
+      config.build_settings['EXPANDED_CODE_SIGN_IDENTITY[sdk=iphonesimulator*]'] = ''
       config.build_settings['GCC_GENERATE_DEBUGGING_SYMBOLS'] = 'YES'
       config.build_settings['DEBUG_INFORMATION_FORMAT'] = 'dwarf-with-dsym' if ['Profile', 'Release'].include?(config.name)
       config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
