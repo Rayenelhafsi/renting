@@ -367,6 +367,7 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
     });
     try {
       final push = PushNotificationService.instance;
+      _attachOwnerPushListeners(push);
       final permission = await push.requestPermission();
       if (permission.authorizationStatus == AuthorizationStatus.denied) {
         debugPrint(
@@ -376,6 +377,13 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       }
       final token = (await push.getToken())?.trim() ?? '';
       if (token.isEmpty) {
+        if (await push.isAppleSimulator()) {
+          debugPrint(
+            'Owner push registration skipped on iOS simulator. Use simctl '
+            'push to validate notification handling.',
+          );
+          return;
+        }
         debugPrint(
           'Owner push registration failed: empty FCM token for owner '
           '$_resolvedOwnerId on ${push.registeredPlatform}',
@@ -395,25 +403,6 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
             .then((_) {})
             .catchError((_) {});
       });
-      _foregroundMessageSubscription?.cancel();
-      _foregroundMessageSubscription = push.onMessage.listen((message) {
-        _handleForegroundOwnerMessage(message);
-      });
-      _openedMessageSubscription ??=
-          FirebaseMessaging.onMessageOpenedApp.listen((message) {
-        _handleOpenedOwnerMessage(message);
-      });
-      _openedLocalNotificationSubscription ??=
-          push.onNotificationTap.listen(_handleOpenedOwnerLocalNotification);
-      final initialMessage =
-          await FirebaseMessaging.instance.getInitialMessage();
-      if (initialMessage != null) {
-        await _handleOpenedOwnerMessage(initialMessage);
-      }
-      final initialLocalPayload = push.takeLaunchNotificationPayload();
-      if (initialLocalPayload != null) {
-        await _handleOpenedOwnerLocalNotification(initialLocalPayload);
-      }
     } catch (error, stackTrace) {
       debugPrint('Owner push registration error: $error');
       debugPrintStack(stackTrace: stackTrace);
@@ -433,6 +422,27 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       token: token,
       platform: PushNotificationService.instance.registeredPlatform,
     );
+  }
+
+  void _attachOwnerPushListeners(PushNotificationService push) {
+    _foregroundMessageSubscription ??= push.onMessage.listen((message) {
+      _handleForegroundOwnerMessage(message);
+    });
+    _openedMessageSubscription ??=
+        FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      _handleOpenedOwnerMessage(message);
+    });
+    _openedLocalNotificationSubscription ??=
+        push.onNotificationTap.listen(_handleOpenedOwnerLocalNotification);
+    FirebaseMessaging.instance.getInitialMessage().then((initialMessage) async {
+      if (initialMessage != null) {
+        await _handleOpenedOwnerMessage(initialMessage);
+      }
+    }).catchError((_) {});
+    final initialLocalPayload = push.takeLaunchNotificationPayload();
+    if (initialLocalPayload != null) {
+      unawaited(_handleOpenedOwnerLocalNotification(initialLocalPayload));
+    }
   }
 
   void _schedulePushRegistrationRetry() {

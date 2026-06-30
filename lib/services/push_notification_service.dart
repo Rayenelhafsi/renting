@@ -47,6 +47,7 @@ class PushNotificationService {
   static const Duration _apnsTokenPollInterval = Duration(seconds: 1);
   static const int _apnsTokenPollAttempts = 60;
   static bool _backgroundNotificationsReady = false;
+  bool? _isAppleSimulatorCache;
 
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
@@ -263,6 +264,13 @@ class PushNotificationService {
   }
 
   Future<String?> getToken() async {
+    if (await isAppleSimulator()) {
+      debugPrint(
+        'PushNotificationService: skipping FCM token fetch on iOS simulator '
+        'because APNs token is not available in this run.',
+      );
+      return null;
+    }
     await _ensureApplePushTokenReady();
     return FirebaseMessaging.instance.getToken();
   }
@@ -271,6 +279,9 @@ class PushNotificationService {
     if (kIsWeb) return;
     if (defaultTargetPlatform != TargetPlatform.iOS &&
         defaultTargetPlatform != TargetPlatform.macOS) {
+      return;
+    }
+    if (await isAppleSimulator()) {
       return;
     }
 
@@ -306,6 +317,26 @@ class PushNotificationService {
         'PushNotificationService: native remote notification registration '
         'failed: $error',
       );
+    }
+  }
+
+  Future<bool> isAppleSimulator() async {
+    if (kIsWeb) return false;
+    if (defaultTargetPlatform != TargetPlatform.iOS &&
+        defaultTargetPlatform != TargetPlatform.macOS) {
+      return false;
+    }
+    final cached = _isAppleSimulatorCache;
+    if (cached != null) return cached;
+    try {
+      final value =
+          await _pushRegistrationChannel.invokeMethod<bool>('isSimulator') ??
+              false;
+      _isAppleSimulatorCache = value;
+      return value;
+    } catch (_) {
+      _isAppleSimulatorCache = false;
+      return false;
     }
   }
 

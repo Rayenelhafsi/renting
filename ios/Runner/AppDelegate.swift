@@ -118,6 +118,12 @@ import flutter_local_notifications
                     UIApplication.shared.registerForRemoteNotifications()
                 }
                 result(true)
+            case "isSimulator":
+                #if targetEnvironment(simulator)
+                result(true)
+                #else
+                result(false)
+                #endif
             default:
                 result(FlutterMethodNotImplemented)
             }

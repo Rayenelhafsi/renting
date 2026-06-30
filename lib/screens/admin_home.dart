@@ -194,6 +194,13 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         return;
       }
       final token = (await push.getToken())?.trim() ?? '';
+      if (token.isEmpty && await push.isAppleSimulator()) {
+        debugPrint(
+          'Admin push registration skipped on iOS simulator. Use simctl '
+          'push to validate notification handling.',
+        );
+        return;
+      }
       if (token.isNotEmpty) {
         await _api.registerAdminPushToken(
           token: token,
