@@ -1,5 +1,6 @@
 # Uncomment this line to define a global platform for your project
 platform :ios, '13.0'
+inhibit_all_warnings!
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -44,6 +45,8 @@ post_install do |installer|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
       config.build_settings['GCC_GENERATE_DEBUGGING_SYMBOLS'] = 'YES'
       config.build_settings['DEBUG_INFORMATION_FORMAT'] = 'dwarf-with-dsym' if ['Profile', 'Release'].include?(config.name)
+      config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
+      config.build_settings['SWIFT_SUPPRESS_WARNINGS'] = 'YES'
     end
   end
 
@@ -69,5 +72,20 @@ post_install do |installer|
       .gsub('setRegisterPlugins:', 'setPluginRegistrantCallback:')
       .gsub('FlutterPluginRegistrantCallback *)callback', 'FlutterPluginRegistrantCallback)callback')
     File.write(local_notifications_header, patched_header) if patched_header != header
+  end
+
+  Dir.glob(File.join(installer.sandbox.root, 'Target Support Files', 'Pods-Runner*', 'Pods-Runner-frameworks.sh')).each do |frameworks_script_path|
+    script = File.read(frameworks_script_path)
+    next if script.include?('Skipping static framework wrapper')
+
+    patched_script = script.sub(
+      "  if [ -L \"${source}\" ]; then\n    echo \"Symlinked...\"\n    source=\"$(readlink -f \"${source}\")\"\n  fi\n",
+      "  if [ -L \"${source}\" ]; then\n    echo \"Symlinked...\"\n    source=\"$(readlink -f \"${source}\")\"\n  fi\n\n  local basename\n  basename=\"$(basename -s .framework \"$1\")\"\n  if [[ \"${source}\" == *.framework ]] && ! [ -r \"${source}/${basename}\" ]; then\n    echo \"Skipping framework wrapper without Mach-O binary: ${source}\"\n    rm -rf \"${destination}/${basename}.framework\"\n    return\n  fi\n  if [[ \"${source}\" == *.framework ]] && [[ \"$(file \"${source}/${basename}\")\" == *\"current ar archive\"* ]]; then\n    echo \"Skipping static framework wrapper: ${source}\"\n    rm -rf \"${destination}/${basename}.framework\"\n    return\n  fi\n"
+    ).sub(
+      "  local basename\n  basename=\"$(basename -s .framework \"$1\")\"\n  binary=\"${destination}/${basename}.framework/${basename}\"\n",
+      "  binary=\"${destination}/${basename}.framework/${basename}\"\n"
+    )
+
+    File.write(frameworks_script_path, patched_script)
   end
 end

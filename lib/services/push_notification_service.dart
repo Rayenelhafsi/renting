@@ -225,10 +225,10 @@ class PushNotificationService {
     _initialized = true;
   }
 
-  Future<NotificationSettings> requestPermission() {
+  Future<NotificationSettings> requestPermission() async {
     if (defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.macOS) {
-      _localNotifications
+      await _localNotifications
           .resolvePlatformSpecificImplementation<
               IOSFlutterLocalNotificationsPlugin>()
           ?.requestPermissions(
@@ -236,7 +236,7 @@ class PushNotificationService {
             badge: true,
             sound: true,
           );
-      _localNotifications
+      await _localNotifications
           .resolvePlatformSpecificImplementation<
               MacOSFlutterLocalNotificationsPlugin>()
           ?.requestPermissions(
@@ -411,9 +411,11 @@ class PushNotificationService {
       title,
       body,
       _iosRecurringAvailabilityInterval,
-      notificationDetails: _buildDarwinDetails(
-        isAvailabilityRequest: true,
-        isAdminAlert: false,
+      NotificationDetails(
+        iOS: _buildDarwinDetails(
+          isAvailabilityRequest: true,
+          isAdminAlert: false,
+        ),
       ),
       payload: payload,
     );

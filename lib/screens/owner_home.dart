@@ -7,6 +7,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -1618,7 +1619,7 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
         }
 
         return ListView.builder(
-          scrollCacheExtent: ScrollCacheExtent.pixels(1800),
+          scrollCacheExtent: const ScrollCacheExtent.pixels(1800),
           key: const PageStorageKey<String>('owner-properties-list'),
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 22),
           itemCount: houses.length,

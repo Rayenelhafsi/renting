@@ -1,0 +1,13 @@
+#!/bin/zsh
+
+set -e
+
+SCRIPT_DIR="${0:A:h}"
+PROJECT_ROOT="${SCRIPT_DIR:h}"
+IOS_DIR="${PROJECT_ROOT}/ios"
+
+export PATH="${HOME}/.gem/ruby/2.6.0/bin:${PATH}"
+export RUBYOPT="-rlogger"
+
+cd "${IOS_DIR}"
+exec bundle _2.4.22_ exec pod "$@"
