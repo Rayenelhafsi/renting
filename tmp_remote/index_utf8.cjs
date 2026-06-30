@@ -20965,7 +20965,20 @@ app.post('/api/mobile/owners/:ownerId/chat', async (req, res) => {
 
 
 
-    await createAdminNotification('info', `Nouveau message proprietaire (${ownerId})`);
+    await createAdminNotificationWithPush(
+      'info',
+      `Nouveau message proprietaire (${ownerId})`,
+      {
+        title: 'Nouveau message proprietaire',
+        kind: 'owner_admin_chat',
+        data: {
+          ownerId,
+          bienId: bienId || '',
+          propertyTitle: propertyTitle || '',
+          interactionId: created?.id || '',
+        },
+      }
+    );
 
     res.status(201).json(created);
 
@@ -21091,12 +21104,23 @@ app.post('/api/mobile/admin/owners/:ownerId/chat', requireAdminSession, async (r
 
     );
 
+    await pushToOwnerDevices(ownerId, {
+      title: 'Nouveau message admin',
+      body: 'Nouveau message de l admin',
+      data: {
+        title: 'Nouveau message admin',
+        body: 'Nouveau message de l admin',
+        kind: 'admin_owner_chat',
+        ownerId,
+        bienId: bienId || '',
+        propertyTitle: propertyTitle || '',
+        interactionId: created?.id || '',
+      },
+    });
+
     await createAdminNotification(
-
       'info',
-
-      `Message admin envoyÃ© au proprietaire ${ownerId}${bienId ? ` (bien ${bienId})` : ''}`
-
+      `Message admin envoye au proprietaire ${ownerId}${bienId ? ` (bien ${bienId})` : ''}`
     );
 
 
@@ -29382,12 +29406,14 @@ async function pushToAdminDevices(payload) {
         apns: {
           headers: {
             'apns-priority': '10',
+            'apns-push-type': 'alert',
           },
           payload: {
             aps: {
               alert: { title, body },
               sound: 'availability_request.wav',
               badge: 1,
+              'content-available': 1,
             },
           },
         },
@@ -36630,7 +36656,6 @@ app.listen(PORT, () => {
   runOwnerCalendarPromptSchedulerTick();
 
 });
-
 
 
 

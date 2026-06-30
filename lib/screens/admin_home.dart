@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -195,7 +194,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       if (token.isNotEmpty) {
         await _api.registerAdminPushToken(
           token: token,
-          platform: kIsWeb ? 'web' : 'mobile',
+          platform: push.registeredPlatform,
         );
       }
       _adminTokenRefreshSubscription?.cancel();
@@ -203,7 +202,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         _api
             .registerAdminPushToken(
               token: nextToken,
-              platform: kIsWeb ? 'web' : 'mobile',
+              platform: push.registeredPlatform,
             )
             .catchError((_) {});
       });

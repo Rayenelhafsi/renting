@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -149,8 +151,8 @@ class Root extends StatefulWidget {
 class _RootState extends State<Root> {
   User? _user;
   DocumentSnapshot? _userDoc;
-  late final Stream<User?> _authStateChanges;
-  Stream<DocumentSnapshot>? _userDocStream;
+  StreamSubscription<User?>? _authStateSubscription;
+  StreamSubscription<DocumentSnapshot>? _userDocSubscription;
   PersistedSession? _persistedSession;
   bool _sessionLoaded = false;
 
@@ -158,26 +160,37 @@ class _RootState extends State<Root> {
   void initState() {
     super.initState();
     _loadPersistedSession();
-    _authStateChanges = FirebaseAuth.instance.authStateChanges();
-    _authStateChanges.listen((user) {
+    _authStateSubscription =
+        FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (!mounted) return;
       setState(() {
         _user = user;
         if (user != null) {
-          _userDocStream = FirebaseFirestore.instance
+          _userDocSubscription?.cancel();
+          _userDocSubscription = FirebaseFirestore.instance
               .collection('users')
               .doc(user.uid)
-              .snapshots();
-          _userDocStream!.listen((doc) {
+              .snapshots()
+              .listen((doc) {
+            if (!mounted) return;
             setState(() {
               _userDoc = doc;
             });
           });
         } else {
-          _userDocStream = null;
+          _userDocSubscription?.cancel();
+          _userDocSubscription = null;
           _userDoc = null;
         }
       });
     });
+  }
+
+  @override
+  void dispose() {
+    _authStateSubscription?.cancel();
+    _userDocSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadPersistedSession() async {

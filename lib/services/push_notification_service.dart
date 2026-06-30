@@ -42,6 +42,8 @@ class PushNotificationService {
   );
   static const MethodChannel _availabilityAlarmChannel =
       MethodChannel('dwira/availability_alarm');
+  static const Duration _apnsTokenPollInterval = Duration(milliseconds: 400);
+  static const int _apnsTokenPollAttempts = 15;
   static bool _backgroundNotificationsReady = false;
 
   final FlutterLocalNotificationsPlugin _localNotifications =
@@ -252,8 +254,39 @@ class PushNotificationService {
     );
   }
 
-  Future<String?> getToken() {
+  Future<String?> getToken() async {
+    await _ensureApplePushTokenReady();
     return FirebaseMessaging.instance.getToken();
+  }
+
+  Future<void> _ensureApplePushTokenReady() async {
+    if (kIsWeb) return;
+    if (defaultTargetPlatform != TargetPlatform.iOS &&
+        defaultTargetPlatform != TargetPlatform.macOS) {
+      return;
+    }
+
+    for (var attempt = 0; attempt < _apnsTokenPollAttempts; attempt++) {
+      final apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+      if ((apnsToken ?? '').trim().isNotEmpty) {
+        return;
+      }
+      await Future<void>.delayed(_apnsTokenPollInterval);
+    }
+  }
+
+  String get registeredPlatform {
+    if (kIsWeb) return 'web';
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.iOS:
+        return 'ios';
+      case TargetPlatform.android:
+        return 'android';
+      case TargetPlatform.macOS:
+        return 'macos';
+      default:
+        return 'mobile';
+    }
   }
 
   Stream<String> get onTokenRefresh =>

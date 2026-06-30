@@ -6,9 +6,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -36,6 +36,9 @@ class OwnerHomeScreen extends StatefulWidget {
 
 class _OwnerHomeScreenState extends State<OwnerHomeScreen>
     with TickerProviderStateMixin {
+  static const MethodChannel _availabilityAlarmChannel =
+      MethodChannel('dwira/availability_alarm');
+
   final HousesRepository _housesRepository = const HousesRepository();
   final DwiraApiService _api = DwiraApiService.instance;
   final TextEditingController _chatController = TextEditingController();
@@ -378,7 +381,7 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
             .registerOwnerPushToken(
               ownerId: _resolvedOwnerId,
               token: nextToken,
-              platform: kIsWeb ? 'web' : 'mobile',
+              platform: push.registeredPlatform,
             )
             .then((_) {})
             .catchError((_) {});
@@ -416,7 +419,7 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
     await _api.registerOwnerPushToken(
       ownerId: _resolvedOwnerId,
       token: token,
-      platform: kIsWeb ? 'web' : 'mobile',
+      platform: PushNotificationService.instance.registeredPlatform,
     );
   }
 
@@ -673,6 +676,16 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
     if (_availabilityRinging) return;
     _availabilityRinging = true;
     try {
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        try {
+          final started =
+              await _availabilityAlarmChannel.invokeMethod<bool>('start');
+          if (started == true) return;
+        } catch (_) {
+          // Fall back to the Flutter audio player if the native channel is
+          // not ready yet.
+        }
+      }
       await _availabilityAudioPlayer.stop();
       await _availabilityAudioPlayer.setReleaseMode(ReleaseMode.loop);
       await _availabilityAudioPlayer.play(
@@ -687,6 +700,13 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
   Future<void> _stopAvailabilityRingtone() async {
     if (!_availabilityRinging) return;
     _availabilityRinging = false;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      try {
+        await _availabilityAlarmChannel.invokeMethod<void>('stop');
+      } catch (_) {
+        // The fallback player is stopped below.
+      }
+    }
     await _availabilityAudioPlayer.stop();
   }
 
