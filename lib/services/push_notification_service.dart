@@ -264,15 +264,22 @@ class PushNotificationService {
   }
 
   Future<String?> getToken() async {
-    if (await isAppleSimulator()) {
-      debugPrint(
-        'PushNotificationService: skipping FCM token fetch on iOS simulator '
-        'because APNs token is not available in this run.',
-      );
-      return null;
-    }
     await _ensureApplePushTokenReady();
-    return FirebaseMessaging.instance.getToken();
+    try {
+      return await FirebaseMessaging.instance.getToken();
+    } catch (error) {
+      final message = error.toString();
+      if ((defaultTargetPlatform == TargetPlatform.iOS ||
+              defaultTargetPlatform == TargetPlatform.macOS) &&
+          message.contains('apns-token-not-set')) {
+        debugPrint(
+          'PushNotificationService: FCM token fetch deferred because APNs '
+          'token is still unavailable.',
+        );
+        return null;
+      }
+      rethrow;
+    }
   }
 
   Future<void> _ensureApplePushTokenReady() async {
@@ -281,10 +288,6 @@ class PushNotificationService {
         defaultTargetPlatform != TargetPlatform.macOS) {
       return;
     }
-    if (await isAppleSimulator()) {
-      return;
-    }
-
     for (var attempt = 0; attempt < _apnsTokenPollAttempts; attempt++) {
       if (attempt == 0 || attempt % 5 == 0) {
         await _forceAppleRemoteNotificationRegistration();

@@ -377,13 +377,6 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       }
       final token = (await push.getToken())?.trim() ?? '';
       if (token.isEmpty) {
-        if (await push.isAppleSimulator()) {
-          debugPrint(
-            'Owner push registration skipped on iOS simulator. Use simctl '
-            'push to validate notification handling.',
-          );
-          return;
-        }
         debugPrint(
           'Owner push registration failed: empty FCM token for owner '
           '$_resolvedOwnerId on ${push.registeredPlatform}',
