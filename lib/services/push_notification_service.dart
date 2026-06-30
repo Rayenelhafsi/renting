@@ -36,6 +36,7 @@ class PushNotificationService {
   static const String _adminCalendarKind = 'calendar_update_request';
   static const String _availabilityChannelId = 'owner_availability_requests_v2';
   static const String _adminAlertChannelId = 'admin_alerts_v2';
+  static const String _iosAvailabilitySound = 'availability_request.wav';
   static const int _iosRecurringAvailabilityNotificationId = 41002;
   static const Duration _iosRecurringAvailabilityInterval = Duration(
     minutes: 1,
@@ -497,7 +498,7 @@ class PushNotificationService {
       presentBanner: true,
       presentList: true,
       presentSound: true,
-      sound: null,
+      sound: isAvailabilityRequest ? _iosAvailabilitySound : null,
       interruptionLevel: isAvailabilityRequest || isAdminAlert
           ? InterruptionLevel.timeSensitive
           : InterruptionLevel.active,
