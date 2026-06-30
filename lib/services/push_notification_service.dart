@@ -42,8 +42,10 @@ class PushNotificationService {
   );
   static const MethodChannel _availabilityAlarmChannel =
       MethodChannel('dwira/availability_alarm');
-  static const Duration _apnsTokenPollInterval = Duration(milliseconds: 400);
-  static const int _apnsTokenPollAttempts = 15;
+  static const MethodChannel _pushRegistrationChannel =
+      MethodChannel('dwira/push_registration');
+  static const Duration _apnsTokenPollInterval = Duration(seconds: 1);
+  static const int _apnsTokenPollAttempts = 60;
   static bool _backgroundNotificationsReady = false;
 
   final FlutterLocalNotificationsPlugin _localNotifications =
@@ -245,13 +247,19 @@ class PushNotificationService {
             badge: true,
             sound: true,
           );
+      await _forceAppleRemoteNotificationRegistration();
     }
-    return FirebaseMessaging.instance.requestPermission(
+    final settings = await FirebaseMessaging.instance.requestPermission(
       alert: true,
       badge: true,
       sound: true,
       provisional: false,
     );
+    if (settings.authorizationStatus == AuthorizationStatus.authorized ||
+        settings.authorizationStatus == AuthorizationStatus.provisional) {
+      await _forceAppleRemoteNotificationRegistration();
+    }
+    return settings;
   }
 
   Future<String?> getToken() async {
@@ -267,11 +275,37 @@ class PushNotificationService {
     }
 
     for (var attempt = 0; attempt < _apnsTokenPollAttempts; attempt++) {
+      if (attempt == 0 || attempt % 5 == 0) {
+        await _forceAppleRemoteNotificationRegistration();
+      }
       final apnsToken = await FirebaseMessaging.instance.getAPNSToken();
       if ((apnsToken ?? '').trim().isNotEmpty) {
         return;
       }
       await Future<void>.delayed(_apnsTokenPollInterval);
+    }
+
+    debugPrint(
+      'PushNotificationService: APNs token still missing after waiting '
+      '${_apnsTokenPollAttempts * _apnsTokenPollInterval.inSeconds}s',
+    );
+  }
+
+  Future<void> _forceAppleRemoteNotificationRegistration() async {
+    if (kIsWeb) return;
+    if (defaultTargetPlatform != TargetPlatform.iOS &&
+        defaultTargetPlatform != TargetPlatform.macOS) {
+      return;
+    }
+    try {
+      await _pushRegistrationChannel.invokeMethod<bool>(
+        'registerRemoteNotifications',
+      );
+    } catch (error) {
+      debugPrint(
+        'PushNotificationService: native remote notification registration '
+        'failed: $error',
+      );
     }
   }
 

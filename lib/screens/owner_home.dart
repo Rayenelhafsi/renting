@@ -7,7 +7,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -75,6 +75,7 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
   bool _availabilityRinging = false;
   bool _registeringPushToken = false;
   int _consecutiveEmptyAvailabilityPolls = 0;
+  bool _pushRetryScheduled = false;
 
   @override
   void initState() {
@@ -368,10 +369,18 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       final push = PushNotificationService.instance;
       final permission = await push.requestPermission();
       if (permission.authorizationStatus == AuthorizationStatus.denied) {
+        debugPrint(
+          'Owner push registration skipped: notification permission denied',
+        );
         return;
       }
       final token = (await push.getToken())?.trim() ?? '';
       if (token.isEmpty) {
+        debugPrint(
+          'Owner push registration failed: empty FCM token for owner '
+          '$_resolvedOwnerId on ${push.registeredPlatform}',
+        );
+        _schedulePushRegistrationRetry();
         return;
       }
       await _registerPushToken(token);
@@ -405,7 +414,10 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       if (initialLocalPayload != null) {
         await _handleOpenedOwnerLocalNotification(initialLocalPayload);
       }
-    } catch (_) {
+    } catch (error, stackTrace) {
+      debugPrint('Owner push registration error: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      _schedulePushRegistrationRetry();
     } finally {
       if (mounted) {
         setState(() {
@@ -421,6 +433,16 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       token: token,
       platform: PushNotificationService.instance.registeredPlatform,
     );
+  }
+
+  void _schedulePushRegistrationRetry() {
+    if (_pushRetryScheduled || !mounted) return;
+    _pushRetryScheduled = true;
+    Future<void>.delayed(const Duration(seconds: 10), () {
+      _pushRetryScheduled = false;
+      if (!mounted) return;
+      _initPushNotifications();
+    });
   }
 
   Future<void> _handleForegroundOwnerMessage(RemoteMessage message) async {
@@ -1653,7 +1675,7 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
         }
 
         return ListView.builder(
-          scrollCacheExtent: const ScrollCacheExtent.pixels(1800),
+          cacheExtent: 1800,
           key: const PageStorageKey<String>('owner-properties-list'),
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 22),
           itemCount: houses.length,

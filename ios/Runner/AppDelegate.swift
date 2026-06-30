@@ -10,6 +10,7 @@ import flutter_local_notifications
 @objc class AppDelegate: FlutterAppDelegate, MessagingDelegate {
     private var availabilityAlarmPlayer: AVAudioPlayer?
     private var availabilityAlarmChannelRegistered = false
+    private var pushRegistrationChannelRegistered = false
 
     override func application(
         _ application: UIApplication,
@@ -33,6 +34,7 @@ import flutter_local_notifications
         GeneratedPluginRegistrant.register(with: self)
         let launchResult = super.application(application, didFinishLaunchingWithOptions: launchOptions)
         registerAvailabilityAlarmChannelWhenReady()
+        registerPushRegistrationChannelWhenReady()
         return launchResult
     }
 
@@ -50,6 +52,11 @@ import flutter_local_notifications
     ) {
         NSLog("APNs registration failed: \(error.localizedDescription)")
         super.application(application, didFailToRegisterForRemoteNotificationsWithError: error)
+    }
+
+    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+        let tokenPreview = String((fcmToken ?? "").prefix(24))
+        NSLog("FCM registration token updated: \(tokenPreview)")
     }
 
     private func registerAvailabilityAlarmChannelWhenReady(attempt: Int = 0) {
@@ -82,6 +89,38 @@ import flutter_local_notifications
             }
         }
         availabilityAlarmChannelRegistered = true
+    }
+
+    private func registerPushRegistrationChannelWhenReady(attempt: Int = 0) {
+        if pushRegistrationChannelRegistered {
+            return
+        }
+
+        guard let controller = findFlutterViewController() else {
+            if attempt < 30 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    self?.registerPushRegistrationChannelWhenReady(attempt: attempt + 1)
+                }
+            }
+            return
+        }
+
+        let pushChannel = FlutterMethodChannel(
+            name: "dwira/push_registration",
+            binaryMessenger: controller.binaryMessenger
+        )
+        pushChannel.setMethodCallHandler { call, result in
+            switch call.method {
+            case "registerRemoteNotifications":
+                DispatchQueue.main.async {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+                result(true)
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
+        pushRegistrationChannelRegistered = true
     }
 
     private func findFlutterViewController() -> FlutterViewController? {

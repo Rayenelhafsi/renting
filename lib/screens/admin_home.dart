@@ -188,6 +188,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       final push = PushNotificationService.instance;
       final permission = await push.requestPermission();
       if (permission.authorizationStatus.name == 'denied') {
+        debugPrint(
+          'Admin push registration skipped: notification permission denied',
+        );
         return;
       }
       final token = (await push.getToken())?.trim() ?? '';
@@ -206,8 +209,15 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             )
             .catchError((_) {});
       });
-    } catch (_) {
-      // Local polling still works even if permission request fails.
+      if (token.isEmpty) {
+        debugPrint(
+          'Admin push registration failed: empty FCM token on '
+          '${push.registeredPlatform}',
+        );
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Admin push registration error: $error');
+      debugPrintStack(stackTrace: stackTrace);
     } finally {
       _initializingAdminNotifications = false;
     }
