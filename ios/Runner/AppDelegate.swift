@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import UserNotifications
+import FirebaseCore
 import FirebaseMessaging
 import flutter_local_notifications
 
@@ -10,6 +11,10 @@ import flutter_local_notifications
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
+
         if #available(iOS 10.0, *) {
             UNUserNotificationCenter.current().delegate = self
         }
