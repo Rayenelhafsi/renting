@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -8,7 +9,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -43,6 +43,7 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
   late final TabController _tabController;
   late final AnimationController _availabilityGlowController;
   late final Animation<double> _availabilityGlowAnimation;
+  late final AudioPlayer _availabilityAudioPlayer;
 
   Future<List<Map<String, dynamic>>>? _ownerNotificationsFuture;
   Future<List<OwnerHouse>>? _ownerHousesFuture;
@@ -85,6 +86,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       parent: _availabilityGlowController,
       curve: Curves.easeInOut,
     );
+    _availabilityAudioPlayer = AudioPlayer(playerId: 'availability_alarm');
+    _availabilityAudioPlayer.setReleaseMode(ReleaseMode.loop);
     WidgetsBinding.instance.addObserver(_lifecycleObserver);
     _ownerHousesFuture = _loadOwnerHouses();
     _refreshComms(showChatLoader: true);
@@ -104,6 +107,7 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
     _tabController.dispose();
     _availabilityGlowController.dispose();
     _stopAvailabilityRingtone();
+    _availabilityAudioPlayer.dispose();
     PushNotificationService.instance.stopAvailabilityAlarm();
     _chatScrollController.dispose();
     _chatController.dispose();
@@ -668,12 +672,22 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
   Future<void> _startAvailabilityRingtone() async {
     if (_availabilityRinging) return;
     _availabilityRinging = true;
-    SystemSound.play(SystemSoundType.alert);
+    try {
+      await _availabilityAudioPlayer.stop();
+      await _availabilityAudioPlayer.setReleaseMode(ReleaseMode.loop);
+      await _availabilityAudioPlayer.play(
+        AssetSource('audio/availability_request.wav'),
+        volume: 1.0,
+      );
+    } catch (_) {
+      _availabilityRinging = false;
+    }
   }
 
   Future<void> _stopAvailabilityRingtone() async {
     if (!_availabilityRinging) return;
     _availabilityRinging = false;
+    await _availabilityAudioPlayer.stop();
   }
 
   void _handleTabChanged() {

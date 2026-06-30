@@ -29264,6 +29264,7 @@ async function pushToOwnerDevices(ownerId, payload) {
           headers: {
 
             'apns-priority': '10',
+            'apns-push-type': 'alert',
 
           },
 
@@ -29279,13 +29280,10 @@ async function pushToOwnerDevices(ownerId, payload) {
 
               },
 
-              sound: isAvailabilityRequest
-
-                ? 'availability_request.wav'
-
-                : 'default',
+              sound: 'default',
 
               badge: 1,
+              'content-available': 1,
 
             },
 
@@ -29297,17 +29295,13 @@ async function pushToOwnerDevices(ownerId, payload) {
 
 
 
-      if (!isAvailabilityRequest) {
+      message.notification = {
 
-        message.notification = {
+        title: String(payload?.title || 'Dwira'),
 
-          title: String(payload?.title || 'Dwira'),
+        body: String(payload?.body || ''),
 
-          body: String(payload?.body || ''),
-
-        };
-
-      }
+      };
 
 
 
@@ -36636,9 +36630,6 @@ app.listen(PORT, () => {
   runOwnerCalendarPromptSchedulerTick();
 
 });
-
-
-
 
 
 

@@ -40,7 +40,6 @@ class PushNotificationService {
   static const Duration _iosRecurringAvailabilityInterval = Duration(
     minutes: 1,
   );
-  static const String _iosAvailabilitySound = 'availability_request.wav';
   static const MethodChannel _availabilityAlarmChannel =
       MethodChannel('dwira/availability_alarm');
   static bool _backgroundNotificationsReady = false;
@@ -431,7 +430,7 @@ class PushNotificationService {
       presentBanner: true,
       presentList: true,
       presentSound: true,
-      sound: isAvailabilityRequest ? _iosAvailabilitySound : null,
+      sound: null,
       interruptionLevel: isAvailabilityRequest || isAdminAlert
           ? InterruptionLevel.timeSensitive
           : InterruptionLevel.active,
