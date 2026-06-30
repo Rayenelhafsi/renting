@@ -42,6 +42,8 @@ post_install do |installer|
 
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+      config.build_settings['GCC_GENERATE_DEBUGGING_SYMBOLS'] = 'YES'
+      config.build_settings['DEBUG_INFORMATION_FORMAT'] = 'dwarf-with-dsym' if ['Profile', 'Release'].include?(config.name)
     end
   end
 
@@ -63,7 +65,9 @@ post_install do |installer|
   )
   if File.exist?(local_notifications_header)
     header = File.read(local_notifications_header)
-    patched_header = header.gsub('setRegisterPlugins:', 'setPluginRegistrantCallback:')
+    patched_header = header
+      .gsub('setRegisterPlugins:', 'setPluginRegistrantCallback:')
+      .gsub('FlutterPluginRegistrantCallback *)callback', 'FlutterPluginRegistrantCallback)callback')
     File.write(local_notifications_header, patched_header) if patched_header != header
   end
 end

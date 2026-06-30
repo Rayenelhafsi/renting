@@ -1,4 +1,3 @@
-import 'dart:ui' as ui;
 import 'dart:html' as html;
 
 @pragma('vm:entry-point')

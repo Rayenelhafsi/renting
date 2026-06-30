@@ -36,6 +36,11 @@ class PushNotificationService {
   static const String _adminCalendarKind = 'calendar_update_request';
   static const String _availabilityChannelId = 'owner_availability_requests_v2';
   static const String _adminAlertChannelId = 'admin_alerts_v2';
+  static const int _iosRecurringAvailabilityNotificationId = 41002;
+  static const Duration _iosRecurringAvailabilityInterval = Duration(
+    minutes: 1,
+  );
+  static const String _iosAvailabilitySound = 'availability_request.wav';
   static const MethodChannel _availabilityAlarmChannel =
       MethodChannel('dwira/availability_alarm');
   static bool _backgroundNotificationsReady = false;
@@ -79,7 +84,11 @@ class PushNotificationService {
     if (_backgroundNotificationsReady || kIsWeb) return;
     const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosSettings = DarwinInitializationSettings();
+    const iosSettings = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    );
     const initSettings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
@@ -110,10 +119,12 @@ class PushNotificationService {
         : isAdminAlert
             ? _adminAlertChannel
             : _defaultChannel;
+    final resolvedTitle = title.isEmpty ? 'Notification' : title;
+    final resolvedBody = body.isEmpty ? null : body;
     await _backgroundLocalNotifications.show(
       message.hashCode,
-      title.isEmpty ? 'Notification' : title,
-      body.isEmpty ? null : body,
+      resolvedTitle,
+      resolvedBody,
       NotificationDetails(
         android: AndroidNotificationDetails(
           channel.id,
@@ -128,12 +139,9 @@ class PushNotificationService {
           ongoing: isAvailabilityRequest,
           autoCancel: !isAvailabilityRequest,
         ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentBanner: true,
-          presentList: true,
-          presentSound: true,
+        iOS: _buildDarwinDetails(
+          isAvailabilityRequest: isAvailabilityRequest,
+          isAdminAlert: isAdminAlert,
         ),
       ),
       payload: _encodePayload(
@@ -145,6 +153,21 @@ class PushNotificationService {
         ),
       ),
     );
+    if (defaultTargetPlatform == TargetPlatform.iOS && isAvailabilityRequest) {
+      await _scheduleIosRecurringAvailabilityNotification(
+        plugin: _backgroundLocalNotifications,
+        title: resolvedTitle,
+        body: resolvedBody,
+        payload: _encodePayload(
+          _buildNotificationPayload(
+            title: title,
+            body: body,
+            data: message.data,
+            messageId: message.messageId,
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> initialize() async {
@@ -155,7 +178,11 @@ class PushNotificationService {
 
     const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosSettings = DarwinInitializationSettings();
+    const iosSettings = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    );
     const initSettings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
@@ -199,6 +226,25 @@ class PushNotificationService {
   }
 
   Future<NotificationSettings> requestPermission() {
+    if (defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS) {
+      _localNotifications
+          .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+      _localNotifications
+          .resolvePlatformSpecificImplementation<
+              MacOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+    }
     return FirebaseMessaging.instance.requestPermission(
       alert: true,
       badge: true,
@@ -225,7 +271,12 @@ class PushNotificationService {
   }
 
   Future<void> stopAvailabilityAlarm() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    if (kIsWeb) return;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await _cancelIosRecurringAvailabilityNotification();
+      return;
+    }
+    if (defaultTargetPlatform != TargetPlatform.android) return;
     try {
       await _availabilityAlarmChannel.invokeMethod<void>('stop');
     } catch (_) {
@@ -325,15 +376,68 @@ class PushNotificationService {
           ongoing: isAvailabilityRequest,
           autoCancel: !isAvailabilityRequest,
         ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentBanner: true,
-          presentList: true,
-          presentSound: true,
+        iOS: _buildDarwinDetails(
+          isAvailabilityRequest: isAvailabilityRequest,
+          isAdminAlert: isAdminAlert,
         ),
       ),
       payload: payload,
+    );
+    if (defaultTargetPlatform == TargetPlatform.iOS && isAvailabilityRequest) {
+      await _scheduleIosRecurringAvailabilityNotification(
+        plugin: _localNotifications,
+        title: title,
+        body: body,
+        payload: payload,
+      );
+    }
+  }
+
+  Future<void> _cancelIosRecurringAvailabilityNotification() async {
+    await _localNotifications.cancel(_iosRecurringAvailabilityNotificationId);
+    await _backgroundLocalNotifications.cancel(
+      _iosRecurringAvailabilityNotificationId,
+    );
+  }
+
+  static Future<void> _scheduleIosRecurringAvailabilityNotification({
+    required FlutterLocalNotificationsPlugin plugin,
+    required String title,
+    required String? body,
+    required String? payload,
+  }) async {
+    await plugin.periodicallyShowWithDuration(
+      _iosRecurringAvailabilityNotificationId,
+      title,
+      body,
+      _iosRecurringAvailabilityInterval,
+      notificationDetails: _buildDarwinDetails(
+        isAvailabilityRequest: true,
+        isAdminAlert: false,
+      ),
+      payload: payload,
+    );
+  }
+
+  static DarwinNotificationDetails _buildDarwinDetails({
+    required bool isAvailabilityRequest,
+    required bool isAdminAlert,
+  }) {
+    return DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentBanner: true,
+      presentList: true,
+      presentSound: true,
+      sound: isAvailabilityRequest ? _iosAvailabilitySound : null,
+      interruptionLevel: isAvailabilityRequest || isAdminAlert
+          ? InterruptionLevel.timeSensitive
+          : InterruptionLevel.active,
+      threadIdentifier: isAvailabilityRequest
+          ? _availabilityChannelId
+          : isAdminAlert
+              ? _adminAlertChannelId
+              : _defaultChannel.id,
     );
   }
 

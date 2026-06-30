@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import UserNotifications
+import FirebaseMessaging
 import flutter_local_notifications
 
 @main
@@ -13,11 +14,21 @@ import flutter_local_notifications
             UNUserNotificationCenter.current().delegate = self
         }
 
+        application.registerForRemoteNotifications()
+
         FlutterLocalNotificationsPlugin.setPluginRegistrantCallback { registry in
             GeneratedPluginRegistrant.register(with: registry)
         }
 
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    }
+
+    override func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        Messaging.messaging().apnsToken = deviceToken
+        super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
     }
 
     func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {

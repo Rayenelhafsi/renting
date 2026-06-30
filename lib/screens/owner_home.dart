@@ -45,7 +45,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
 
   Future<List<Map<String, dynamic>>>? _ownerNotificationsFuture;
   Future<List<OwnerHouse>>? _ownerHousesFuture;
-  List<Map<String, dynamic>> _ownerChatMessages = const <Map<String, dynamic>>[];
+  List<Map<String, dynamic>> _ownerChatMessages =
+      const <Map<String, dynamic>>[];
   bool _chatLoaded = false;
   bool _chatLoading = false;
   bool _sendingChat = false;
@@ -53,7 +54,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
   StreamSubscription<String>? _tokenRefreshSubscription;
   StreamSubscription<RemoteMessage>? _foregroundMessageSubscription;
   StreamSubscription<RemoteMessage>? _openedMessageSubscription;
-  StreamSubscription<Map<String, dynamic>>? _openedLocalNotificationSubscription;
+  StreamSubscription<Map<String, dynamic>>?
+      _openedLocalNotificationSubscription;
   int _ownerUnreadNotifications = 0;
   int _ownerUnreadChatCount = 0;
   int _pendingAvailabilityCount = 0;
@@ -386,7 +388,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       });
       _openedLocalNotificationSubscription ??=
           push.onNotificationTap.listen(_handleOpenedOwnerLocalNotification);
-      final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+      final initialMessage =
+          await FirebaseMessaging.instance.getInitialMessage();
       if (initialMessage != null) {
         await _handleOpenedOwnerMessage(initialMessage);
       }
@@ -443,7 +446,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
           _calendarPromptFlowInProgress) {
         return;
       }
-      final prompt = await _api.fetchPendingOwnerCalendarPrompt(_resolvedOwnerId);
+      final prompt =
+          await _api.fetchPendingOwnerCalendarPrompt(_resolvedOwnerId);
       if (!mounted || prompt == null) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted ||
@@ -466,7 +470,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
               message.data['demandId'] ??
               message.data['id'])
           .toString(),
-      body: message.notification?.body ?? (message.data['body'] ?? '').toString(),
+      body:
+          message.notification?.body ?? (message.data['body'] ?? '').toString(),
     );
     if (_isDuplicateOpenedNotification(fingerprint)) return;
     await _refreshComms();
@@ -485,7 +490,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       return;
     }
     if (kind == 'calendar_daily_check_prompt') {
-      final prompt = await _api.fetchPendingOwnerCalendarPrompt(_resolvedOwnerId);
+      final prompt =
+          await _api.fetchPendingOwnerCalendarPrompt(_resolvedOwnerId);
       if (!mounted || prompt == null) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted ||
@@ -530,7 +536,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       return;
     }
     if (kind == 'calendar_daily_check_prompt') {
-      final prompt = await _api.fetchPendingOwnerCalendarPrompt(_resolvedOwnerId);
+      final prompt =
+          await _api.fetchPendingOwnerCalendarPrompt(_resolvedOwnerId);
       if (!mounted || prompt == null) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted ||
@@ -638,15 +645,15 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
         _calendarPromptFlowInProgress) {
       return;
     }
-	    try {
-	      final prompt =
-	          await _api.fetchPendingOwnerCalendarPrompt(_resolvedOwnerId);
-	      if (!mounted || prompt == null || _pendingAvailabilityCount > 0) return;
-	      if (_hasUnreadPriorityNotifications()) return;
-	      WidgetsBinding.instance.addPostFrameCallback((_) {
-	        if (!mounted ||
-	            _showingAvailabilityDialog ||
-	            _showingCalendarPromptDialog ||
+    try {
+      final prompt =
+          await _api.fetchPendingOwnerCalendarPrompt(_resolvedOwnerId);
+      if (!mounted || prompt == null || _pendingAvailabilityCount > 0) return;
+      if (_hasUnreadPriorityNotifications()) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            _showingAvailabilityDialog ||
+            _showingCalendarPromptDialog ||
             _calendarPromptFlowInProgress) {
           return;
         }
@@ -717,7 +724,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
     }
     if (latestAdminMessageId == null || latestAdminMessageId.isEmpty) return;
     final hadSeenMessage = _lastSeenAdminChatMessageId != null;
-    final isNewAdminMessage = latestAdminMessageId != _lastSeenAdminChatMessageId;
+    final isNewAdminMessage =
+        latestAdminMessageId != _lastSeenAdminChatMessageId;
     _lastSeenAdminChatMessageId = latestAdminMessageId;
     if (!hadSeenMessage || !isNewAdminMessage) return;
     if (_tabController.index == 1) return;
@@ -766,9 +774,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
   }
 
   Future<void> _openOwnerAppUpdateLink(Map<String, dynamic> data) async {
-    final targetUrl = (data['targetUrl'] ?? data['playStoreUrl'] ?? '')
-        .toString()
-        .trim();
+    final targetUrl =
+        (data['targetUrl'] ?? data['playStoreUrl'] ?? '').toString().trim();
     if (targetUrl.isEmpty) return;
     final uri = Uri.tryParse(targetUrl);
     if (uri == null) return;
@@ -783,8 +790,10 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
     final startDate = (request['start_date'] ?? '').toString();
     final endDate = (request['end_date'] ?? '').toString();
     final guests = (request['guests'] ?? '').toString();
-    final adultGuests = _parseGuestCount(request['adult_guests'] ?? request['adultGuests']);
-    final childGuests = _parseGuestCount(request['child_guests'] ?? request['childGuests']);
+    final adultGuests =
+        _parseGuestCount(request['adult_guests'] ?? request['adultGuests']);
+    final childGuests =
+        _parseGuestCount(request['child_guests'] ?? request['childGuests']);
     final totalGuests = _parseGuestCount(guests);
     final resolvedAdultGuests =
         adultGuests > 0 ? adultGuests : (totalGuests > 0 ? totalGuests : 1);
@@ -863,7 +872,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
               onTap: () async {
                 try {
                   await _stopAvailabilityRingtone();
-                  await PushNotificationService.instance.stopAvailabilityAlarm();
+                  await PushNotificationService.instance
+                      .stopAvailabilityAlarm();
                   await _api.respondOwnerAvailabilityRequest(
                     ownerId: _resolvedOwnerId,
                     demandId: demandId,
@@ -928,7 +938,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
               onPressed: () async {
                 try {
                   await _stopAvailabilityRingtone();
-                  await PushNotificationService.instance.stopAvailabilityAlarm();
+                  await PushNotificationService.instance
+                      .stopAvailabilityAlarm();
                   await _api.respondOwnerAvailabilityRequest(
                     ownerId: _resolvedOwnerId,
                     demandId: demandId,
@@ -937,7 +948,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
                   if (!mounted) return;
                   Navigator.of(this.context).pop();
                   ScaffoldMessenger.of(this.context).showSnackBar(
-                    const SnackBar(content: Text('Reponse envoyee: disponible')),
+                    const SnackBar(
+                        content: Text('Reponse envoyee: disponible')),
                   );
                   await _refreshComms();
                 } catch (e) {
@@ -1331,7 +1343,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
   List<Map<String, dynamic>> _sortOwnerNotifications(
     List<Map<String, dynamic>> items,
   ) {
-    final sorted = items.map((item) => Map<String, dynamic>.from(item)).toList();
+    final sorted =
+        items.map((item) => Map<String, dynamic>.from(item)).toList();
     sorted.sort((a, b) {
       final aPrompt = _isCalendarPromptNotification(a);
       final bPrompt = _isCalendarPromptNotification(b);
@@ -1350,7 +1363,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
   List<Map<String, dynamic>> _sortOwnerChatMessages(
     List<Map<String, dynamic>> items,
   ) {
-    final sorted = items.map((item) => Map<String, dynamic>.from(item)).toList();
+    final sorted =
+        items.map((item) => Map<String, dynamic>.from(item)).toList();
     sorted.sort((a, b) {
       final aCreated =
           (a['createdAt'] ?? a['created_at'] ?? '').toString().trim();
@@ -1500,9 +1514,10 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       }
     }
     final title = _cleanOwnerNotificationTitle(rawMessage);
-    final createdAt = (notification['createdAt'] ?? notification['created_at'] ?? '')
-        .toString()
-        .trim();
+    final createdAt =
+        (notification['createdAt'] ?? notification['created_at'] ?? '')
+            .toString()
+            .trim();
     final createdDate = DateTime.tryParse(createdAt);
     return _OwnerNotificationViewData(
       title: title.isEmpty ? 'Notification' : title,
@@ -1603,8 +1618,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
         }
 
         return ListView.builder(
+          scrollCacheExtent: ScrollCacheExtent.pixels(1800),
           key: const PageStorageKey<String>('owner-properties-list'),
-          cacheExtent: 1800,
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 22),
           itemCount: houses.length,
           itemBuilder: (context, index) {
@@ -1773,12 +1788,14 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
                           controller: _chatScrollController,
                           padding: const EdgeInsets.fromLTRB(2, 8, 2, 18),
                           itemCount: _ownerChatMessages.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 14),
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 14),
                           itemBuilder: (context, index) {
                             final msg = _ownerChatMessages[index];
                             final kind = (msg['kind'] ?? '').toString();
                             final text = (msg['text'] ?? '').toString();
-                            final createdAt = (msg['createdAt'] ?? '').toString();
+                            final createdAt =
+                                (msg['createdAt'] ?? '').toString();
                             final fromAdmin = kind == 'admin_owner_chat';
                             final timeLabel = _formatChatTimestamp(createdAt);
                             return Align(
@@ -1831,8 +1848,10 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
                                       ),
                                     ),
                                   Container(
-                                    constraints: const BoxConstraints(maxWidth: 340),
-                                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                                    constraints:
+                                        const BoxConstraints(maxWidth: 340),
+                                    padding: const EdgeInsets.fromLTRB(
+                                        16, 14, 16, 12),
                                     decoration: BoxDecoration(
                                       gradient: fromAdmin
                                           ? const LinearGradient(
@@ -1901,7 +1920,8 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
                                             color: fromAdmin
                                                 ? const Color(0xFFF8FAFC)
                                                 : const Color(0x1FFFFFFF),
-                                            borderRadius: BorderRadius.circular(999),
+                                            borderRadius:
+                                                BorderRadius.circular(999),
                                           ),
                                           child: Text(
                                             timeLabel,
@@ -2147,10 +2167,12 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
                                             'owner_app_update'))
                                       FilledButton.tonal(
                                         onPressed: () async {
-                                          final metadata = Map<String, dynamic>.from(
+                                          final metadata =
+                                              Map<String, dynamic>.from(
                                             n['metadata'] as Map,
                                           );
-                                          await _openOwnerAppUpdateLink(metadata);
+                                          await _openOwnerAppUpdateLink(
+                                              metadata);
                                         },
                                         child: const Text('Ouvrir Play Store'),
                                       ),
@@ -2179,111 +2201,111 @@ class _OwnerHomeScreenState extends State<OwnerHomeScreen>
       builder: (context, language, _) => Directionality(
         textDirection: UiLanguageService.direction(language),
         child: Scaffold(
+          backgroundColor: const Color(0xFFF4FBF7),
+          appBar: AppBar(
             backgroundColor: const Color(0xFFF4FBF7),
-            appBar: AppBar(
-              backgroundColor: const Color(0xFFF4FBF7),
-              surfaceTintColor: Colors.transparent,
-              scrolledUnderElevation: 0,
-              title: Text(
-                t('my_properties'),
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF14532D),
-                ),
-              ),
-              actions: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: _OwnerActionButton(
-                    icon: Icons.language_rounded,
-                    onTap: _showLanguageSheet,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: _OwnerActionButton(
-                    icon: Icons.qr_code_2_rounded,
-                    onTap: _showOwnerQr,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: _OwnerActionButton(
-                    icon: Icons.logout_rounded,
-                    onTap: () => _logout(context),
-                  ),
-                ),
-              ],
-              bottom: TabBar(
-                controller: _tabController,
-                dividerColor: Colors.transparent,
-                indicatorColor: const Color(0xFF177245),
-                indicatorWeight: 4,
-                indicatorSize: TabBarIndicatorSize.label,
-                labelColor: const Color(0xFF14532D),
-                unselectedLabelColor: const Color(0xFF6B7280),
-                tabs: [
-                  Tab(
-                    icon: const Icon(Icons.home_work_outlined),
-                    text: t('tab_properties'),
-                  ),
-                  Tab(
-                    icon: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        const Icon(Icons.chat_bubble_outline),
-                        if (_ownerUnreadChatCount > 0)
-                          Positioned(
-                            right: -6,
-                            top: -6,
-                            child: Container(
-                              width: 10,
-                              height: 10,
-                              decoration: const BoxDecoration(
-                                color: Colors.red,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                    text: t('tab_chat'),
-                  ),
-                  Tab(
-                    icon: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        const Icon(Icons.notifications_outlined),
-                        if (_ownerUnreadNotifications > 0 ||
-                            _pendingAvailabilityCount > 0)
-                          Positioned(
-                            right: -6,
-                            top: -6,
-                            child: Container(
-                              width: 10,
-                              height: 10,
-                              decoration: const BoxDecoration(
-                                color: Colors.red,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                    text: t('tab_notifications'),
-                  ),
-                ],
+            surfaceTintColor: Colors.transparent,
+            scrolledUnderElevation: 0,
+            title: Text(
+              t('my_properties'),
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF14532D),
               ),
             ),
-            body: TabBarView(
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: _OwnerActionButton(
+                  icon: Icons.language_rounded,
+                  onTap: _showLanguageSheet,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: _OwnerActionButton(
+                  icon: Icons.qr_code_2_rounded,
+                  onTap: _showOwnerQr,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: _OwnerActionButton(
+                  icon: Icons.logout_rounded,
+                  onTap: () => _logout(context),
+                ),
+              ),
+            ],
+            bottom: TabBar(
               controller: _tabController,
-              children: [
-                _buildPropertiesTab(),
-                _buildChatTab(),
-                _buildNotificationsTab(),
+              dividerColor: Colors.transparent,
+              indicatorColor: const Color(0xFF177245),
+              indicatorWeight: 4,
+              indicatorSize: TabBarIndicatorSize.label,
+              labelColor: const Color(0xFF14532D),
+              unselectedLabelColor: const Color(0xFF6B7280),
+              tabs: [
+                Tab(
+                  icon: const Icon(Icons.home_work_outlined),
+                  text: t('tab_properties'),
+                ),
+                Tab(
+                  icon: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      const Icon(Icons.chat_bubble_outline),
+                      if (_ownerUnreadChatCount > 0)
+                        Positioned(
+                          right: -6,
+                          top: -6,
+                          child: Container(
+                            width: 10,
+                            height: 10,
+                            decoration: const BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  text: t('tab_chat'),
+                ),
+                Tab(
+                  icon: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      const Icon(Icons.notifications_outlined),
+                      if (_ownerUnreadNotifications > 0 ||
+                          _pendingAvailabilityCount > 0)
+                        Positioned(
+                          right: -6,
+                          top: -6,
+                          child: Container(
+                            width: 10,
+                            height: 10,
+                            decoration: const BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  text: t('tab_notifications'),
+                ),
               ],
             ),
+          ),
+          body: TabBarView(
+            controller: _tabController,
+            children: [
+              _buildPropertiesTab(),
+              _buildChatTab(),
+              _buildNotificationsTab(),
+            ],
+          ),
         ),
       ),
     );

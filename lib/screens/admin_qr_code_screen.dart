@@ -71,7 +71,7 @@ class _AdminQRCodeScreenState extends State<AdminQRCodeScreen> {
                         child: Text(owner['email']),
                       ))
                   .toList(),
-              value: selectedOwnerId,
+              initialValue: selectedOwnerId,
               onChanged: (value) {
                 setState(() {
                   selectedOwnerId = value;
