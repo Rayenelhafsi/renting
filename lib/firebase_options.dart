@@ -1,4 +1,4 @@
-﻿import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
+import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
 
@@ -45,7 +45,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyCwIQPvqYy99_S5AYs-d6SVzislBEYcDZw',
-    appId: '1:269507169080:ios:7b596e5c2109c4f3510fcd',
+    appId: '1:269507169080:ios:886099bd74b4d197510fcd',
     messagingSenderId: '269507169080',
     projectId: 'tresor-home-renting',
     storageBucket: 'tresor-home-renting.firebasestorage.app',
@@ -54,7 +54,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyCwIQPvqYy99_S5AYs-d6SVzislBEYcDZw',
-    appId: '1:269507169080:ios:7b596e5c2109c4f3510fcd',
+    appId: '1:269507169080:ios:886099bd74b4d197510fcd',
     messagingSenderId: '269507169080',
     projectId: 'tresor-home-renting',
     storageBucket: 'tresor-home-renting.firebasestorage.app',
@@ -78,4 +78,3 @@ class DefaultFirebaseOptions {
     storageBucket: 'your-storage-bucket',
   );
 }
-
